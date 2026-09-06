@@ -1,0 +1,2 @@
+class Settings:
+    mode="research"
