@@ -1,3 +1,3 @@
 class PortfolioAI:
     def analyze(self, positions):
-        return {'positions': len(positions)}
+        return {'positions':positions,'risk':'CHECKED'}

@@ -1,0 +1,41 @@
+campaign:
+  name: ATLAS_RESEARCH_RUN_001
+  mode: RESEARCH_ONLY
+
+environment:
+  research_pc: true
+  trading_enabled: false
+
+universe:
+  stocks: [ROSN, SBER, LKOH, GAZP, TATN, NVTK, GMKN, PLZL, CHMF, MAGN, MOEX, YDEX]
+  futures: [CNYRUBF, USDRUBF, EURRUBF, IMOEXF, RTSF, BR, GOLD]
+
+strategies:
+  - ROSN_HEDGE_V3
+  - CNYRUBF_BRM
+  - TREND_FOLLOWING
+  - TREND_PULLBACK
+  - EMA_ADX
+  - BREAKOUT_RETEST
+  - VOLATILITY_BREAKOUT
+  - MEAN_REVERSION
+  - RSI_REVERSAL
+  - LIQUIDITY_SWEEP
+  - VWAP_PULLBACK
+  - MOMENTUM
+
+timeframes: [5m, 15m, 1h, 1d]
+
+validation:
+  backtest: true
+  walk_forward: true
+  monte_carlo: true
+  regime_analysis: true
+
+metrics:
+  - trades
+  - win_rate
+  - average_r
+  - profit_factor
+  - max_drawdown
+  - sharpe
