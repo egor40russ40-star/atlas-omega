@@ -1,0 +1,26 @@
+CRITICAL_TRIGGERS = {
+    "UNKNOWN_OUTCOME",
+    "POSITION_MISMATCH",
+    "ORDER_MISMATCH",
+    "UNEXPECTED_BROKER_ORDER",
+    "BROKER_DISCONNECT",
+    "KILL_SWITCH",
+    "EMERGENCY",
+    "LIVE_EXCEPTION",
+    "DATA_STORAGE_EMERGENCY",
+}
+
+NORMAL_TRIGGERS = {
+    "ORDER_SUBMIT",
+    "ORDER_REJECTED",
+    "PARTIAL_FILL",
+    "SAFE_TRANSITION",
+    "OPERATOR_SNAPSHOT",
+}
+
+def trigger_class(trigger: str) -> str | None:
+    if trigger in CRITICAL_TRIGGERS:
+        return "BLACKBOX_CRITICAL"
+    if trigger in NORMAL_TRIGGERS:
+        return "BLACKBOX_NORMAL"
+    return None

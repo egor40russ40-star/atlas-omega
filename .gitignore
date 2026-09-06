@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+
+# Runtime data
+data/
+logs/
+state/
+snapshots/
+backups/
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Secrets
+.env
+*.token
+*.secret
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini

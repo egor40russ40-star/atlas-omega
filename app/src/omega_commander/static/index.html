@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ATLAS OMEGA Commander</title>
+<style>
+:root{
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  color-scheme:dark;
+}
+body{margin:0;background:#101218;color:#eef2f7}
+header{padding:18px 20px;border-bottom:1px solid #2a2f3a;position:sticky;top:0;background:#101218}
+h1{font-size:20px;margin:0}
+main{padding:16px;display:grid;gap:14px}
+.status{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.card{background:#171a22;border:1px solid #2a2f3a;border-radius:14px;padding:14px}
+.label{opacity:.7;font-size:12px}.value{font-size:20px;font-weight:700;margin-top:6px}
+.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+button{min-height:54px;border-radius:12px;border:1px solid #3b4250;background:#222733;color:#fff;font-weight:700}
+button.danger{border-color:#7e3030;background:#3a1818}
+button.safe{border-color:#75652d;background:#302a16}
+nav{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+nav a{color:#eef2f7;text-decoration:none;background:#171a22;padding:12px;border-radius:10px;border:1px solid #2a2f3a}
+details{background:#171a22;border:1px solid #2a2f3a;border-radius:12px;padding:12px}
+@media(max-width:760px){
+  .status{grid-template-columns:repeat(2,1fr)}
+  .actions{grid-template-columns:1fr}
+  nav{grid-template-columns:1fr 1fr}
+  header{position:static}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>ATLAS OMEGA — Командный центр</h1>
+</header>
+<main>
+  <section class="status">
+    <div class="card"><div class="label">Система</div><div class="value">DEMO</div></div>
+    <div class="card"><div class="label">Брокер</div><div class="value">—</div></div>
+    <div class="card"><div class="label">Дневной результат</div><div class="value">—</div></div>
+    <div class="card"><div class="label">Открытый риск</div><div class="value">—</div></div>
+  </section>
+
+  <section class="actions">
+    <button class="safe">БЕЗОПАСНАЯ ПАУЗА</button>
+    <button class="safe">ПЕРЕЙТИ В SAFE</button>
+    <button class="danger">АВАРИЙНАЯ ОСТАНОВКА</button>
+  </section>
+
+  <nav>
+    <a href="#">Рынок и сигналы</a>
+    <a href="#">Счета и деньги</a>
+    <a href="#">Позиции</a>
+    <a href="#">Заявки</a>
+    <a href="#">Стратегии</a>
+    <a href="#">Риск и безопасность</a>
+    <a href="#">Прибыль и статистика</a>
+    <a href="#">Исследования</a>
+    <a href="#">Компьютер</a>
+    <a href="#">Ошибки и диагностика</a>
+    <a href="#">Журнал</a>
+    <a href="#">Настройки</a>
+  </nav>
+
+  <details>
+    <summary>Технические подробности</summary>
+    <p>Низкоуровневая диагностика скрыта от основного интерфейса и выводится только здесь.</p>
+  </details>
+</main>
+</body>
+</html>
