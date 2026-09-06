@@ -72,7 +72,7 @@ class AnalyticsRepository:
                 signal.timeframe,
                 signal.market_regime,
                 signal.volatility,
-                signal.signal_reason,
+                signal.reason,
                 datetime.utcnow().isoformat(),
             ),
         )
