@@ -1,0 +1,3 @@
+class EnvironmentConfig:
+    RESEARCH_PC = "ANALYSIS_ONLY"
+    TRADING_MACHINE = "EXECUTION_ONLY"
