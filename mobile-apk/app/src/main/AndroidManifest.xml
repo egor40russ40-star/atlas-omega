@@ -3,7 +3,7 @@
 
     <application
         android:allowBackup="false"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:label="ATLAS Mobile"
         android:icon="@drawable/ic_atlas"
         android:theme="@style/AppTheme">
