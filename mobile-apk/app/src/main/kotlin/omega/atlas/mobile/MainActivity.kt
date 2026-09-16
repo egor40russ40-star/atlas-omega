@@ -21,17 +21,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DarkColorScheme
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -122,6 +121,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun AtlasMobileApp(
         gatewayInitial: String,
@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
 
         val state by connectionState
         val connected = state is TerminalConnectionState.Connected
-        val statusText = when (val s = state) {
+        val statusText = when (state) {
             TerminalConnectionState.Disconnected -> "ОТКЛЮЧЕНО"
             is TerminalConnectionState.Connecting -> "СОЕДИНЕНИЕ"
             is TerminalConnectionState.HostKeyPending -> "КЛЮЧ SSH"
@@ -402,7 +402,8 @@ class MainActivity : ComponentActivity() {
                                 if (request?.isForMainFrame == true) status = "ошибка: ${error?.description ?: "сеть"}"
                             }
                             override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                                handler?.cancel(); status = "ошибка TLS — соединение заблокировано"
+                                handler?.cancel()
+                                status = "ошибка TLS — соединение заблокировано"
                             }
                         }
                         if (AtlasConfig.isAllowedGateway(gateway)) loadUrl(gateway)
@@ -450,7 +451,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val AtlasColors: DarkColorScheme = darkColorScheme(
+private val AtlasColors: ColorScheme = darkColorScheme(
     primary = Color(0xFF4EA1FF),
     secondary = Color(0xFF43C97C),
     background = Color(0xFF080B10),
