@@ -40,10 +40,10 @@ jobs:
           "$SDKM" 'platforms;android-36' 'platform-tools'
           "$SDKM" --list_installed | grep -E 'platforms;android-36|platform-tools'
 
-      - name: Gradle 9.5.1
+      - name: Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.5.1'
+          gradle-version: '9.6.0'
 
       - name: Static safety gates
         working-directory: mobile-apk
