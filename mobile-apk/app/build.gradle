@@ -1,21 +1,25 @@
 plugins {
     id 'com.android.application'
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 android {
     namespace 'omega.atlas.mobile'
-    compileSdk 35
+    compileSdk 37
 
     defaultConfig {
-        applicationId 'omega.atlas.mobile'
+        applicationId 'omega.atlas.mobile.v2'
         minSdk 26
-        targetSdk 35
-        versionCode 1
-        versionName '0.1.0-rc0'
+        targetSdk 36
+        versionCode 20
+        versionName '0.2.0-alpha1'
+
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
     buildFeatures {
         buildConfig true
+        compose true
     }
 
     buildTypes {
@@ -23,7 +27,6 @@ android {
             minifyEnabled false
         }
         debug {
-            applicationIdSuffix '.debug'
             versionNameSuffix '-debug'
         }
     }
@@ -32,4 +35,25 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    packaging {
+        resources {
+            excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'META-INF/DEPENDENCIES']
+        }
+    }
+}
+
+dependencies {
+    implementation platform('androidx.compose:compose-bom:2026.09.00')
+    implementation 'androidx.activity:activity-compose:1.13.0'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.material3:material3:1.5.0-alpha25'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.11.0'
+
+    implementation 'org.connectbot:termlib:0.1.0'
+    implementation 'org.connectbot:sshlib:2.2.48'
+
+    testImplementation 'junit:junit:4.13.2'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
 }
