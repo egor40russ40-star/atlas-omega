@@ -1,6 +1,6 @@
 package omega.atlas.mobile
 
-import android.net.Uri
+import java.net.URI
 
 object AtlasConfig {
     const val DEFAULT_GATEWAY = "https://tinvest-robot.tailf87948.ts.net"
@@ -15,7 +15,7 @@ object AtlasConfig {
 
     fun isAllowedGateway(raw: String): Boolean {
         return try {
-            val u = Uri.parse(normalizeGateway(raw))
+            val u = URI(normalizeGateway(raw))
             u.scheme.equals("https", ignoreCase = true) && !u.host.isNullOrBlank()
         } catch (_: Exception) {
             false
