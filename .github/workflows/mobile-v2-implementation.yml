@@ -1,0 +1,80 @@
+name: ATLAS Mobile 2 V2 Implementation Gate
+
+on:
+  push:
+    branches: [atlas-mobile-v2-implementation]
+    paths:
+      - 'mobile-apk/**'
+      - '.github/workflows/mobile-v2-implementation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+jobs:
+  fast-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKM"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" 'platforms;android-36' 'platform-tools'
+
+      - name: Gradle 9.6.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+          cache-read-only: false
+
+      - name: Static safety gate
+        working-directory: mobile-apk
+        run: |
+          set -euo pipefail
+          grep -R "liveTradingEnabled: Boolean = false" core/model/src/main/kotlin
+          grep -R "liveTradingAuthorityPresent: Boolean = false" core/model/src/main/kotlin
+          grep -R "researchOnly: Boolean = true" core/model/src/main/kotlin
+          grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
+          ! grep -R -E "PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN RSA PRIVATE KEY" core feature transport storage testing
+
+      - name: G1-G2 compile gate
+        working-directory: mobile-apk
+        run: |
+          gradle --no-daemon --stacktrace \
+            :core:model:compileDebugKotlin \
+            :core:result:compileDebugKotlin \
+            :testing:fakes:compileDebugKotlin
+
+      - name: G2 targeted unit tests
+        working-directory: mobile-apk
+        run: |
+          gradle --no-daemon --stacktrace \
+            :core:model:testDebugUnitTest \
+            :core:result:testDebugUnitTest
+
+      - name: Alpha1 regression compile only
+        working-directory: mobile-apk
+        run: gradle --no-daemon --stacktrace :app:compileDebugKotlin
+
+      - name: APK build remains blocked
+        run: |
+          echo 'APK_BUILD=BLOCKED_UNTIL_G7'
+          echo 'LIVE_TRADING_ENABLED=NO'
+          echo 'RESEARCH_ONLY=YES'
