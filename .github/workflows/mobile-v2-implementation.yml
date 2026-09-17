@@ -64,6 +64,8 @@ jobs:
             :feature:terminal:compileDebugKotlin \
             :feature:sessions:compileDebugKotlin \
             :feature:connections:compileDebugKotlin \
+            :feature:files:compileDebugKotlin \
+            :feature:editor:compileDebugKotlin \
             :transport:ssh:compileDebugKotlin \
             :storage:local:compileDebugKotlin \
             :testing:fakes:compileDebugKotlin
@@ -75,6 +77,8 @@ jobs:
             :core:result:testDebugUnitTest \
             :feature:terminal:testDebugUnitTest \
             :feature:sessions:testDebugUnitTest \
+            :feature:files:testDebugUnitTest \
+            :feature:editor:testDebugUnitTest \
             :transport:ssh:testDebugUnitTest \
             :storage:local:testDebugUnitTest
       - name: Alpha1 regression compile only
