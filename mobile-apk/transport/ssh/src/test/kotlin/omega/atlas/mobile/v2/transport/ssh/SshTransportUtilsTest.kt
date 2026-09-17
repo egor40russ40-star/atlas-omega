@@ -7,9 +7,15 @@ class SshTransportUtilsTest {
     @Test
     fun fingerprintIsStableSha256Base64() {
         assertEquals(
-            "SHA256:ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0",
+            "SHA256:fIJgJQCFeqbtDPOMTD5OxkW9yqgsALkVXrCL4QDHeKk",
             SshTransportUtils.fingerprint("atlas".encodeToByteArray()),
         )
+    }
+
+    @Test
+    fun fingerprintMatchesIndependentSha256HexVector() {
+        val actual = SshTransportUtils.fingerprint("atlas".encodeToByteArray())
+        assertEquals("SHA256:fIJgJQCFeqbtDPOMTD5OxkW9yqgsALkVXrCL4QDHeKk", actual)
     }
 
     @Test(expected = IllegalArgumentException::class)
