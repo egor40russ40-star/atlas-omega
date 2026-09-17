@@ -62,6 +62,7 @@ jobs:
             :core:security:compileDebugKotlin \
             :core:ui:compileDebugKotlin \
             :feature:terminal:compileDebugKotlin \
+            :feature:sessions:compileDebugKotlin \
             :transport:ssh:compileDebugKotlin \
             :testing:fakes:compileDebugKotlin
       - name: Targeted unit tests
@@ -71,6 +72,7 @@ jobs:
             :core:model:testDebugUnitTest \
             :core:result:testDebugUnitTest \
             :feature:terminal:testDebugUnitTest \
+            :feature:sessions:testDebugUnitTest \
             :transport:ssh:testDebugUnitTest
       - name: Alpha1 regression compile only
         working-directory: mobile-apk
