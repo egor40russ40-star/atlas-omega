@@ -1,0 +1,14 @@
+plugins { id 'com.android.library' }
+android {
+    namespace 'omega.atlas.mobile.v2.feature.connections'
+    compileSdk 36
+    defaultConfig { minSdk 26 }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+dependencies {
+    implementation project(':core:model')
+    implementation project(':core:result')
+}

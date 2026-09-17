@@ -14,5 +14,25 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AtlasMobileRC0"
+rootProject.name = "AtlasMobileV2"
+
 include ':app'
+include ':core:model'
+include ':core:result'
+include ':core:security'
+include ':core:network'
+include ':core:ui'
+include ':feature:terminal'
+include ':feature:sessions'
+include ':feature:connections'
+include ':feature:files'
+include ':feature:editor'
+include ':feature:git'
+include ':feature:atlas'
+include ':feature:ai'
+include ':feature:settings'
+include ':transport:ssh'
+include ':transport:sftp'
+include ':transport:gateway'
+include ':storage:local'
+include ':testing:fakes'
