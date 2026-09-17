@@ -63,7 +63,9 @@ jobs:
             :core:ui:compileDebugKotlin \
             :feature:terminal:compileDebugKotlin \
             :feature:sessions:compileDebugKotlin \
+            :feature:connections:compileDebugKotlin \
             :transport:ssh:compileDebugKotlin \
+            :storage:local:compileDebugKotlin \
             :testing:fakes:compileDebugKotlin
       - name: Targeted unit tests
         working-directory: mobile-apk
@@ -73,7 +75,8 @@ jobs:
             :core:result:testDebugUnitTest \
             :feature:terminal:testDebugUnitTest \
             :feature:sessions:testDebugUnitTest \
-            :transport:ssh:testDebugUnitTest
+            :transport:ssh:testDebugUnitTest \
+            :storage:local:testDebugUnitTest
       - name: Alpha1 regression compile only
         working-directory: mobile-apk
         run: gradle --no-daemon --stacktrace :app:compileDebugKotlin
