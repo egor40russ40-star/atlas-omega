@@ -26,13 +26,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Android SDK 36
         shell: bash
         run: |
@@ -41,13 +39,11 @@ jobs:
           test -x "$SDKM"
           yes | "$SDKM" --licenses >/dev/null || true
           "$SDKM" 'platforms;android-36' 'platform-tools'
-
       - name: Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
           cache-read-only: false
-
       - name: Static safety gate
         working-directory: mobile-apk
         run: |
@@ -57,29 +53,28 @@ jobs:
           grep -R "researchOnly: Boolean = true" core/model/src/main/kotlin
           grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
           ! grep -R -E "PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN RSA PRIVATE KEY" core feature transport storage testing
-
-      - name: Compile changed foundation
+      - name: Compile current implementation foundation
         working-directory: mobile-apk
         run: |
           gradle --no-daemon --stacktrace \
             :core:model:compileDebugKotlin \
             :core:result:compileDebugKotlin \
+            :core:security:compileDebugKotlin \
             :core:ui:compileDebugKotlin \
             :feature:terminal:compileDebugKotlin \
+            :transport:ssh:compileDebugKotlin \
             :testing:fakes:compileDebugKotlin
-
       - name: Targeted unit tests
         working-directory: mobile-apk
         run: |
           gradle --no-daemon --stacktrace \
             :core:model:testDebugUnitTest \
             :core:result:testDebugUnitTest \
-            :feature:terminal:testDebugUnitTest
-
+            :feature:terminal:testDebugUnitTest \
+            :transport:ssh:testDebugUnitTest
       - name: Alpha1 regression compile only
         working-directory: mobile-apk
         run: gradle --no-daemon --stacktrace :app:compileDebugKotlin
-
       - name: APK build remains blocked
         run: |
           echo 'APK_BUILD=BLOCKED_UNTIL_G7'

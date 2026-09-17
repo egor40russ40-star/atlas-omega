@@ -11,4 +11,8 @@ android {
 dependencies {
     implementation project(':core:model')
     implementation project(':core:result')
+    implementation project(':core:security')
+    implementation project(':feature:terminal')
+    implementation 'org.connectbot:sshlib:2.2.48'
+    testImplementation 'junit:junit:4.13.2'
 }

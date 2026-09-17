@@ -11,4 +11,5 @@ android {
 dependencies {
     api project(':core:model')
     api project(':core:result')
+    api project(':core:security')
 }
