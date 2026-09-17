@@ -1,8 +1,12 @@
-plugins { id 'com.android.library' }
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
 android {
     namespace 'omega.atlas.mobile.v2.feature.connections'
     compileSdk 36
     defaultConfig { minSdk 26 }
+    buildFeatures { compose true }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -11,4 +15,9 @@ android {
 dependencies {
     implementation project(':core:model')
     implementation project(':core:result')
+    implementation project(':core:ui')
+    implementation platform('androidx.compose:compose-bom:2026.05.01')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
 }

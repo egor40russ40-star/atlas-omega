@@ -15,6 +15,15 @@ interface CredentialVault {
     suspend fun loadSshCredential(connectionProfileId: String): AtlasResult<SshCredential>
 }
 
+interface MutableCredentialVault : CredentialVault {
+    suspend fun saveSshCredential(
+        connectionProfileId: String,
+        credential: SshCredential,
+    ): AtlasResult<Unit>
+
+    suspend fun removeSshCredential(connectionProfileId: String): AtlasResult<Unit>
+}
+
 enum class HostKeyDecision {
     TRUSTED,
     UNSEEN,
