@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name_v2">ATLAS Mobile 2</string>
+    <string name="nav_terminal">Терминал</string>
+    <string name="nav_code">Код</string>
+    <string name="nav_files">Файлы</string>
+    <string name="nav_git">Git</string>
+    <string name="nav_atlas">ATLAS</string>
+    <string name="nav_connections">Подключения</string>
+    <string name="status_connected">Подключено</string>
+    <string name="status_reconnecting">Восстановление связи</string>
+    <string name="status_offline">Нет связи</string>
+    <string name="action_retry">Повторить</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_confirm">Подтвердить</string>
+</resources>

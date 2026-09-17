@@ -8,6 +8,10 @@ on:
       - '.github/workflows/mobile-v2-implementation.yml'
   workflow_dispatch:
 
+concurrency:
+  group: mobile-v2-implementation-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -54,20 +58,23 @@ jobs:
           grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
           ! grep -R -E "PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN RSA PRIVATE KEY" core feature transport storage testing
 
-      - name: G1-G2 compile gate
+      - name: Compile changed foundation
         working-directory: mobile-apk
         run: |
           gradle --no-daemon --stacktrace \
             :core:model:compileDebugKotlin \
             :core:result:compileDebugKotlin \
+            :core:ui:compileDebugKotlin \
+            :feature:terminal:compileDebugKotlin \
             :testing:fakes:compileDebugKotlin
 
-      - name: G2 targeted unit tests
+      - name: Targeted unit tests
         working-directory: mobile-apk
         run: |
           gradle --no-daemon --stacktrace \
             :core:model:testDebugUnitTest \
-            :core:result:testDebugUnitTest
+            :core:result:testDebugUnitTest \
+            :feature:terminal:testDebugUnitTest
 
       - name: Alpha1 regression compile only
         working-directory: mobile-apk
