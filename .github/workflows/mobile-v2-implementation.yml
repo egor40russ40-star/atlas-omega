@@ -35,6 +35,13 @@ jobs:
           grep -R "researchOnly: Boolean = true" core/model/src/main/kotlin
           grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
           ! grep -R -E "PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN RSA PRIVATE KEY" core feature transport storage testing app-v2
+          grep -q 'android:usesCleartextTraffic="false"' app-v2/src/main/AndroidManifest.xml
+          grep -q 'android:allowBackup="false"' app-v2/src/main/AndroidManifest.xml
+          grep -q 'android.permission.INTERNET' app-v2/src/main/AndroidManifest.xml
+          grep -q 'android.permission.ACCESS_NETWORK_STATE' app-v2/src/main/AndroidManifest.xml
+          test "$(grep -c '<uses-permission' app-v2/src/main/AndroidManifest.xml)" -eq 2
+          ! grep -E -q 'WRITE_EXTERNAL_STORAGE|READ_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|REQUEST_INSTALL_PACKAGES|CAMERA|RECORD_AUDIO|ACCESS_FINE_LOCATION' app-v2/src/main/AndroidManifest.xml
+          grep -q "applicationId 'omega.atlas.mobile.v2.dev'" app-v2/build.gradle
           echo "SAFETY=PASS"
 
   compile:
@@ -120,6 +127,32 @@ jobs:
             :transport:sftp:testDebugUnitTest \
             :storage:local:testDebugUnitTest
 
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKM"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" 'platforms;android-36' 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+          cache-read-only: true
+      - name: Android lint app-v2
+        working-directory: mobile-apk
+        run: timeout 9m gradle --no-daemon --stacktrace --console=plain :app-v2:lintDebug
+
   legacy-regression:
     name: legacy-regression
     runs-on: ubuntu-latest
@@ -149,7 +182,7 @@ jobs:
   gate-summary:
     name: gate-summary
     if: always()
-    needs: [safety, compile, tests, legacy-regression]
+    needs: [safety, compile, tests, lint, legacy-regression]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -159,12 +192,14 @@ jobs:
           echo "safety=${{ needs.safety.result }}"
           echo "compile=${{ needs.compile.result }}"
           echo "tests=${{ needs.tests.result }}"
+          echo "lint=${{ needs.lint.result }}"
           echo "legacy-regression=${{ needs.legacy-regression.result }}"
           test "${{ needs.safety.result }}" = success
           test "${{ needs.compile.result }}" = success
           test "${{ needs.tests.result }}" = success
+          test "${{ needs.lint.result }}" = success
           test "${{ needs.legacy-regression.result }}" = success
-          echo "V2_FAST_GATE=PASS"
+          echo "V2_G6_PREFLIGHT=PASS"
           echo "APK_BUILD=BLOCKED_UNTIL_G7"
           echo "LIVE_TRADING_ENABLED=NO"
           echo "RESEARCH_ONLY=YES"
