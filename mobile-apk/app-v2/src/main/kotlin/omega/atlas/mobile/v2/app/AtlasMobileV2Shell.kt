@@ -26,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -131,7 +132,7 @@ fun AtlasMobileV2Shell(
                     runtime = runtime,
                     onFileOpened = { destination = RootDestination.CODE },
                 )
-                destination == RootDestination.ATLAS -> AtlasHome()
+                destination == RootDestination.ATLAS -> AtlasHome(runtime)
                 else -> MoreHome(onOpen = { secondaryTitle = it })
             }
         }
@@ -226,6 +227,9 @@ private fun ConnectionSetup(
     var host by remember(current.id) { mutableStateOf(current.host) }
     var port by remember(current.id) { mutableStateOf(current.port.toString()) }
     var username by remember(current.id) { mutableStateOf(current.username) }
+    var gateway by remember(current.id) {
+        mutableStateOf(current.gatewayBaseUrl ?: "https://tinvest-robot.tailf87948.ts.net")
+    }
     var password by remember { mutableStateOf("") }
     var keyPassphrase by remember { mutableStateOf("") }
     var autoConnect by remember(current.id) { mutableStateOf(current.autoConnect) }
@@ -265,6 +269,15 @@ private fun ConnectionSetup(
             )
         }
         item {
+            OutlinedTextField(
+                value = gateway,
+                onValueChange = { gateway = it },
+                label = { Text("HTTPS Gateway ATLAS") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = username,
@@ -296,6 +309,7 @@ private fun ConnectionSetup(
                         host = host,
                         port = port.toIntOrNull() ?: 22,
                         username = username,
+                        gatewayBaseUrl = gateway,
                         autoConnect = autoConnect,
                     )
                 },
@@ -476,11 +490,93 @@ private fun FilesHome(
 }
 
 @Composable
-private fun AtlasHome() = WorkspacePlaceholder(
-    title = "ATLAS",
-    subtitle = "Машины, задания, здоровье системы и AI-помощник",
-    glyph = "Ω",
-)
+private fun AtlasHome(runtime: AtlasTerminalRuntime) {
+    val version by runtime.gatewayVersion
+    val message by runtime.gatewayMessage
+    val busy by runtime.gatewayBusy
+    val profile by runtime.profile
+
+    LaunchedEffect(profile.gatewayBaseUrl) {
+        runtime.refreshGateway()
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("ATLAS Gateway", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        profile.gatewayBaseUrl ?: "Gateway не настроен",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Button(onClick = runtime::refreshGateway, enabled = !busy) {
+                    Text(if (busy) "…" else "Проверить")
+                }
+            }
+        }
+
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(message, style = MaterialTheme.typography.bodyMedium)
+                    val current = version
+                    if (current != null) {
+                        StatusRow("Продукт", current.product)
+                        StatusRow("Версия", current.version)
+                        StatusRow("API", current.apiVersion)
+                        StatusRow("Режим", current.mode)
+                        StatusRow("Identity", current.identityMode)
+                        StatusRow("Live authority", current.liveTradingAuthority)
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("Безопасность клиента", style = MaterialTheme.typography.titleMedium)
+                    StatusRow("LIVE_TRADING_ENABLED", "NO")
+                    StatusRow("RESEARCH_ONLY", "YES")
+                    Text(
+                        "Приложение не получает торговые полномочия автоматически.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
 
 @Composable
 private fun MoreHome(onOpen: (String) -> Unit) {

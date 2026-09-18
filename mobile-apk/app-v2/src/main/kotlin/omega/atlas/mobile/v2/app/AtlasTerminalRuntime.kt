@@ -16,6 +16,8 @@ import omega.atlas.mobile.v2.core.result.AtlasResult
 import omega.atlas.mobile.v2.core.security.HostKeyObservation
 import omega.atlas.mobile.v2.core.security.PinnedHostKeyTrustPolicy
 import omega.atlas.mobile.v2.core.security.SshCredential
+import omega.atlas.mobile.v2.feature.atlas.GatewayEndpointPolicy
+import omega.atlas.mobile.v2.feature.atlas.GatewayVersion
 import omega.atlas.mobile.v2.feature.files.AtomicTextWriteRequest
 import omega.atlas.mobile.v2.feature.files.RemoteFileEntry
 import omega.atlas.mobile.v2.feature.files.RemoteTextDocument
@@ -25,6 +27,7 @@ import omega.atlas.mobile.v2.feature.terminal.TerminalSessionPort
 import omega.atlas.mobile.v2.storage.local.AndroidKeystoreCredentialVault
 import omega.atlas.mobile.v2.storage.local.SharedPreferencesConnectionProfileStore
 import omega.atlas.mobile.v2.storage.local.SharedPreferencesHostKeyStore
+import omega.atlas.mobile.v2.transport.gateway.HttpsGatewayStatusClient
 import omega.atlas.mobile.v2.transport.sftp.TrileadRemoteFilesPort
 import omega.atlas.mobile.v2.transport.ssh.TrileadCommandRunner
 import omega.atlas.mobile.v2.transport.ssh.TrileadTerminalSession
@@ -52,6 +55,7 @@ class AtlasTerminalRuntime(
     private val commandRunner = TrileadCommandRunner(vault, hostKeyPolicy)
     private val coordinator = TerminalSessionCoordinator(transport)
     private val gitRepository = SshGitRepository({ _profile.value }, commandRunner)
+    private val gatewayClient = HttpsGatewayStatusClient()
 
     private val _profile = mutableStateOf(profileStore.load() ?: defaultProfile())
     val profile: State<ConnectionProfile> = _profile
@@ -99,6 +103,15 @@ class AtlasTerminalRuntime(
 
     private val _gitBusy = mutableStateOf(false)
     val gitBusy: State<Boolean> = _gitBusy
+
+    private val _gatewayVersion = mutableStateOf<GatewayVersion?>(null)
+    val gatewayVersion: State<GatewayVersion?> = _gatewayVersion
+
+    private val _gatewayMessage = mutableStateOf("Нажмите «Проверить Gateway»")
+    val gatewayMessage: State<String> = _gatewayMessage
+
+    private val _gatewayBusy = mutableStateOf(false)
+    val gatewayBusy: State<Boolean> = _gatewayBusy
 
     init {
         transport.setListener(this)
@@ -178,11 +191,13 @@ class AtlasTerminalRuntime(
         host: String,
         port: Int,
         username: String,
+        gatewayBaseUrl: String,
         autoConnect: Boolean,
     ) {
         require(host.isNotBlank())
         require(username.isNotBlank())
         require(port in 1..65535)
+        val normalizedGateway = GatewayEndpointPolicy.normalizeHttpsBaseUrl(gatewayBaseUrl)
 
         val previous = _profile.value
         val endpointChanged = previous.host != host.trim() || previous.port != port
@@ -195,6 +210,7 @@ class AtlasTerminalRuntime(
             host = host.trim(),
             port = port,
             username = username.trim(),
+            gatewayBaseUrl = normalizedGateway,
             trustState = if (endpointChanged) TrustState.UNENROLLED else previous.trustState,
             autoConnect = autoConnect,
         )
@@ -352,6 +368,32 @@ class AtlasTerminalRuntime(
         send(payload.encodeToByteArray())
     }
 
+    fun refreshGateway() {
+        val baseUrl = _profile.value.gatewayBaseUrl ?: DEFAULT_GATEWAY
+        scope.launch {
+            _gatewayBusy.value = true
+            _gatewayMessage.value = "Проверка Gateway…"
+        }
+        scope.launch(Dispatchers.IO) {
+            when (val result = gatewayClient.version(baseUrl)) {
+                is AtlasResult.Success -> scope.launch {
+                    _gatewayVersion.value = result.value
+                    _gatewayMessage.value = if (result.value.liveTradingAuthorityAbsent) {
+                        "Gateway доступен • live authority отсутствует"
+                    } else {
+                        "ВНИМАНИЕ: Gateway сообщает live authority = ${result.value.liveTradingAuthority}"
+                    }
+                    _gatewayBusy.value = false
+                }
+                is AtlasResult.Failure -> scope.launch {
+                    _gatewayVersion.value = null
+                    _gatewayMessage.value = "Gateway: ${result.error.technicalDetail ?: result.error.code}"
+                    _gatewayBusy.value = false
+                }
+            }
+        }
+    }
+
     fun refreshGit() {
         scope.launch { _gitBusy.value = true; _gitMessage.value = "Чтение Git status…" }
         scope.launch(Dispatchers.IO) {
@@ -487,11 +529,13 @@ class AtlasTerminalRuntime(
         host = "atlas-omega-nucbox.tailf87948.ts.net",
         port = 22,
         username = "test4",
+        gatewayBaseUrl = DEFAULT_GATEWAY,
         trustState = TrustState.UNENROLLED,
         autoConnect = false,
     )
 
     private companion object {
         const val DEFAULT_WORKSPACE_ROOT = "/home/test4/ATLAS_EXECUTION_NODE"
+        const val DEFAULT_GATEWAY = "https://tinvest-robot.tailf87948.ts.net"
     }
 }

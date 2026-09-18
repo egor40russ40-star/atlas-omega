@@ -11,4 +11,5 @@ android {
 dependencies {
     implementation project(':core:model')
     implementation project(':core:result')
+    testImplementation 'junit:junit:4.13.2'
 }

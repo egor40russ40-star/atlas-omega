@@ -40,8 +40,10 @@ dependencies {
     implementation project(':feature:files')
     implementation project(':feature:editor')
     implementation project(':feature:git')
+    implementation project(':feature:atlas')
     implementation project(':transport:ssh')
     implementation project(':transport:sftp')
+    implementation project(':transport:gateway')
     implementation project(':storage:local')
 
     implementation platform('androidx.compose:compose-bom:2026.05.01')

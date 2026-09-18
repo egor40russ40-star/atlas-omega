@@ -73,8 +73,10 @@ jobs:
             :feature:files:compileDebugKotlin \
             :feature:editor:compileDebugKotlin \
             :feature:git:compileDebugKotlin \
+            :feature:atlas:compileDebugKotlin \
             :transport:ssh:compileDebugKotlin \
             :transport:sftp:compileDebugKotlin \
+            :transport:gateway:compileDebugKotlin \
             :storage:local:compileDebugKotlin \
             :testing:fakes:compileDebugKotlin \
             :app-v2:compileDebugKotlin
@@ -112,6 +114,7 @@ jobs:
             :feature:files:testDebugUnitTest \
             :feature:editor:testDebugUnitTest \
             :feature:git:testDebugUnitTest \
+            :feature:atlas:testDebugUnitTest \
             :transport:ssh:testDebugUnitTest \
             :transport:sftp:testDebugUnitTest \
             :storage:local:testDebugUnitTest
