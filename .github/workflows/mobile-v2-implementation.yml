@@ -111,6 +111,7 @@ jobs:
             :core:result:testDebugUnitTest \
             :feature:terminal:testDebugUnitTest \
             :feature:sessions:testDebugUnitTest \
+            :feature:connections:testDebugUnitTest \
             :feature:files:testDebugUnitTest \
             :feature:editor:testDebugUnitTest \
             :feature:git:testDebugUnitTest \

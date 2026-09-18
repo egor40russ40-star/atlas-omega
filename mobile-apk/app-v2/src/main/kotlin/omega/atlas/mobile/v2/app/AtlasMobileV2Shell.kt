@@ -38,7 +38,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import omega.atlas.mobile.v2.core.model.LayerStatus
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
+import omega.atlas.mobile.v2.feature.connections.ConnectionLaunchPolicy
 import omega.atlas.mobile.v2.feature.editor.CodeEditorScreen
 import omega.atlas.mobile.v2.feature.editor.CodeToTerminalAction
 import omega.atlas.mobile.v2.feature.git.GitScreen
@@ -71,6 +73,12 @@ fun AtlasMobileV2Shell(
     val state by runtime.state
     val profile by runtime.profile
     val message by runtime.message
+
+    LaunchedEffect(Unit) {
+        if (ConnectionLaunchPolicy.canAutoConnect(profile)) {
+            runtime.connect()
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -111,6 +119,10 @@ fun AtlasMobileV2Shell(
         ) {
             when {
                 secondaryTitle == "Git" -> GitHome(
+                    runtime = runtime,
+                    onBack = { secondaryTitle = null },
+                )
+                secondaryTitle == "Мониторинг" -> MonitoringHome(
                     runtime = runtime,
                     onBack = { secondaryTitle = null },
                 )
@@ -683,6 +695,89 @@ private fun GitHome(
             },
         )
     }
+}
+
+@Composable
+private fun MonitoringHome(
+    runtime: AtlasTerminalRuntime,
+    onBack: () -> Unit,
+) {
+    val probes by runtime.healthProbes
+    val busy by runtime.healthBusy
+    val message by runtime.healthMessage
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(onClick = onBack) { Text("← Назад") }
+                Column(Modifier.weight(1f)) {
+                    Text("Мониторинг", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = runtime::runHealthCheck, enabled = !busy) {
+                    Text(if (busy) "…" else "Проверить всё")
+                }
+            }
+        }
+
+        items(probes, key = { it.label }) { probe ->
+            Card(Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        healthGlyph(probe.status),
+                        modifier = Modifier.padding(end = 10.dp),
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(probe.label, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            probe.detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        probe.status.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+        }
+
+        item {
+            Text(
+                "Self-test использует только безопасные чтения/проверки: /version, printf-маркер SSH, SFTP list и Git status. Команды пользователя не повторяются.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun healthGlyph(status: LayerStatus): String = when (status) {
+    LayerStatus.READY -> "●"
+    LayerStatus.CHECKING -> "◌"
+    LayerStatus.BLOCKED -> "!"
+    LayerStatus.DEGRADED -> "△"
+    LayerStatus.OFFLINE -> "×"
+    LayerStatus.UNKNOWN -> "○"
 }
 
 @Composable

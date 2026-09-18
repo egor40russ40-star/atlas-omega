@@ -6,13 +6,16 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import omega.atlas.mobile.v2.core.model.ConnectionProfile
+import omega.atlas.mobile.v2.core.model.LayerStatus
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
 import omega.atlas.mobile.v2.core.model.TerminalSessionDescriptor
 import omega.atlas.mobile.v2.core.model.TrustState
 import omega.atlas.mobile.v2.core.result.AtlasResult
+import omega.atlas.mobile.v2.core.result.ErrorDomain
 import omega.atlas.mobile.v2.core.security.HostKeyObservation
 import omega.atlas.mobile.v2.core.security.PinnedHostKeyTrustPolicy
 import omega.atlas.mobile.v2.core.security.SshCredential
@@ -32,6 +35,12 @@ import omega.atlas.mobile.v2.transport.sftp.TrileadRemoteFilesPort
 import omega.atlas.mobile.v2.transport.ssh.TrileadCommandRunner
 import omega.atlas.mobile.v2.transport.ssh.TrileadTerminalSession
 import org.connectbot.terminal.TerminalEmulator
+
+data class HealthProbeUi(
+    val label: String,
+    val status: LayerStatus,
+    val detail: String,
+)
 
 data class EditorUiState(
     val path: String = "",
@@ -112,6 +121,15 @@ class AtlasTerminalRuntime(
 
     private val _gatewayBusy = mutableStateOf(false)
     val gatewayBusy: State<Boolean> = _gatewayBusy
+
+    private val _healthProbes = mutableStateOf(defaultHealthProbes())
+    val healthProbes: State<List<HealthProbeUi>> = _healthProbes
+
+    private val _healthBusy = mutableStateOf(false)
+    val healthBusy: State<Boolean> = _healthBusy
+
+    private val _healthMessage = mutableStateOf("Диагностика ещё не запускалась")
+    val healthMessage: State<String> = _healthMessage
 
     init {
         transport.setListener(this)
@@ -368,6 +386,125 @@ class AtlasTerminalRuntime(
         send(payload.encodeToByteArray())
     }
 
+    fun runHealthCheck() {
+        if (_healthBusy.value) return
+        scope.launch {
+            _healthBusy.value = true
+            _healthMessage.value = "Параллельная проверка слоёв…"
+            _healthProbes.value = defaultHealthProbes().map {
+                it.copy(status = LayerStatus.CHECKING, detail = "Проверка…")
+            }
+        }
+
+        scope.launch(Dispatchers.IO) {
+            val profile = _profile.value
+            val gatewayDeferred = async {
+                gatewayClient.version(profile.gatewayBaseUrl ?: DEFAULT_GATEWAY)
+            }
+            val sshDeferred = async {
+                commandRunner.run(profile, "printf ATLAS_MOBILE_OK")
+            }
+            val sftpDeferred = async {
+                remoteFilesPort().list(DEFAULT_WORKSPACE_ROOT)
+            }
+            val gitDeferred = async {
+                gitRepository.status(DEFAULT_WORKSPACE_ROOT)
+            }
+
+            val gateway = gatewayDeferred.await()
+            val ssh = sshDeferred.await()
+            val sftp = sftpDeferred.await()
+            val git = gitDeferred.await()
+
+            val probes = listOf(
+                probe(
+                    label = "Gateway",
+                    result = gateway,
+                    successDetail = {
+                        "${it.version} • ${it.mode} • authority=${it.liveTradingAuthority}"
+                    },
+                ),
+                probe(
+                    label = "SSH",
+                    result = ssh,
+                    successDetail = {
+                        if (it.exitCode == 0 && it.stdout.contains("ATLAS_MOBILE_OK")) "Командный канал готов"
+                        else "Неожиданный ответ SSH"
+                    },
+                ),
+                probe(
+                    label = "SFTP",
+                    result = sftp,
+                    successDetail = { "${it.size} объектов в корне проекта" },
+                ),
+                probe(
+                    label = "Git",
+                    result = git,
+                    successDetail = {
+                        if (it.isClean) "Ветка ${it.branch} • чисто"
+                        else "Ветка ${it.branch} • ${it.changes.size} изменений"
+                    },
+                ),
+                terminalProbe(),
+            )
+
+            scope.launch {
+                _healthProbes.value = probes
+                val ready = probes.count { it.status == LayerStatus.READY }
+                val blocked = probes.count { it.status == LayerStatus.BLOCKED }
+                _healthMessage.value = "Готово: $ready/${probes.size} READY" +
+                    if (blocked > 0) " • требуется действие: $blocked" else ""
+                _healthBusy.value = false
+            }
+        }
+    }
+
+    private fun <T> probe(
+        label: String,
+        result: AtlasResult<T>,
+        successDetail: (T) -> String,
+    ): HealthProbeUi = when (result) {
+        is AtlasResult.Success -> HealthProbeUi(label, LayerStatus.READY, successDetail(result.value))
+        is AtlasResult.Failure -> {
+            val status = when (result.error.domain) {
+                ErrorDomain.TRUST,
+                ErrorDomain.AUTH -> LayerStatus.BLOCKED
+                ErrorDomain.NETWORK -> LayerStatus.OFFLINE
+                else -> LayerStatus.DEGRADED
+            }
+            HealthProbeUi(
+                label,
+                status,
+                result.error.technicalDetail?.lineSequence()?.firstOrNull()?.take(180)
+                    ?: result.error.code,
+            )
+        }
+    }
+
+    private fun terminalProbe(): HealthProbeUi {
+        val current = _state.value
+        val status = when (current) {
+            TerminalLifecycleState.READY -> LayerStatus.READY
+            TerminalLifecycleState.BLOCKED -> LayerStatus.BLOCKED
+            TerminalLifecycleState.ERROR -> LayerStatus.DEGRADED
+            TerminalLifecycleState.CONNECTING,
+            TerminalLifecycleState.AUTHENTICATING,
+            TerminalLifecycleState.OPENING_PTY,
+            TerminalLifecycleState.ATTACHING_TMUX,
+            TerminalLifecycleState.RECONNECTING -> LayerStatus.CHECKING
+            TerminalLifecycleState.DISCONNECTED -> LayerStatus.UNKNOWN
+        }
+        return HealthProbeUi("Terminal/tmux", status, userMessageForTerminalState(current))
+    }
+
+    private fun userMessageForTerminalState(state: TerminalLifecycleState): String = when (state) {
+        TerminalLifecycleState.READY -> "PTY/tmux рабочая сессия активна"
+        TerminalLifecycleState.BLOCKED -> "Требуется подтверждение доверия"
+        TerminalLifecycleState.ERROR -> "Последняя терминальная операция завершилась ошибкой"
+        TerminalLifecycleState.DISCONNECTED -> "Терминал не подключён"
+        else -> "Терминал выполняет переход состояния"
+    }
+
     fun refreshGateway() {
         val baseUrl = _profile.value.gatewayBaseUrl ?: DEFAULT_GATEWAY
         scope.launch {
@@ -511,6 +648,14 @@ class AtlasTerminalRuntime(
         "sftp_host_key_blocked" -> "SFTP заблокирован: требуется подтверждение SSH-ключа"
         else -> "Ошибка файлов: ${detail ?: code}"
     }
+
+    private fun defaultHealthProbes(): List<HealthProbeUi> = listOf(
+        HealthProbeUi("Gateway", LayerStatus.UNKNOWN, "Не проверено"),
+        HealthProbeUi("SSH", LayerStatus.UNKNOWN, "Не проверено"),
+        HealthProbeUi("SFTP", LayerStatus.UNKNOWN, "Не проверено"),
+        HealthProbeUi("Git", LayerStatus.UNKNOWN, "Не проверено"),
+        HealthProbeUi("Terminal/tmux", LayerStatus.UNKNOWN, "Не проверено"),
+    )
 
     private fun gitErrorMessage(detail: String?): String =
         "Git: " + (detail?.lineSequence()?.firstOrNull()?.take(220) ?: "операция не выполнена")
