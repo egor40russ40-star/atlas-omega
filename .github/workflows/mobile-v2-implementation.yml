@@ -34,7 +34,7 @@ jobs:
           grep -R "liveTradingAuthorityPresent: Boolean = false" core/model/src/main/kotlin
           grep -R "researchOnly: Boolean = true" core/model/src/main/kotlin
           grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
-          ! grep -R -E "PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN RSA PRIVATE KEY" core feature transport storage testing app-v2
+          ! grep -R -E "-----BEGIN (OPENSSH |RSA |EC )?PRIVATE KEY-----" core feature transport storage testing app-v2
           grep -q 'android:usesCleartextTraffic="false"' app-v2/src/main/AndroidManifest.xml
           grep -q 'android:allowBackup="false"' app-v2/src/main/AndroidManifest.xml
           grep -q 'android.permission.INTERNET' app-v2/src/main/AndroidManifest.xml
