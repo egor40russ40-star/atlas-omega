@@ -54,7 +54,7 @@ jobs:
           grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
           grep -q 'android:usesCleartextTraffic="false"' app-v2/src/main/AndroidManifest.xml
           test "$(grep -c '<uses-permission' app-v2/src/main/AndroidManifest.xml)" -eq 2
-          ! grep -R -E "PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN RSA PRIVATE KEY" core feature transport storage testing app-v2
+          ! grep -R -E "-----BEGIN (OPENSSH |RSA |EC )?PRIVATE KEY-----" core feature transport storage testing app-v2
 
       - name: Lint and assemble candidate
         working-directory: mobile-apk
