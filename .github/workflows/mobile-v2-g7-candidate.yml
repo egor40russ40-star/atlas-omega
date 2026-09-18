@@ -1,0 +1,92 @@
+name: ATLAS Mobile 2 G7 Candidate APK
+
+on:
+  push:
+    branches: [atlas-mobile-v2-g7-build]
+    paths:
+      - 'mobile-apk/**'
+      - '.github/workflows/mobile-v2-g7-candidate.yml'
+
+concurrency:
+  group: mobile-v2-g7-candidate
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKM"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" 'platforms;android-36' 'platform-tools' 'build-tools;36.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+          cache-read-only: false
+
+      - name: Candidate safety check
+        working-directory: mobile-apk
+        run: |
+          set -euo pipefail
+          grep -R "liveTradingEnabled: Boolean = false" core/model/src/main/kotlin
+          grep -R "liveTradingAuthorityPresent: Boolean = false" core/model/src/main/kotlin
+          grep -R "researchOnly: Boolean = true" core/model/src/main/kotlin
+          grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
+          grep -q 'android:usesCleartextTraffic="false"' app-v2/src/main/AndroidManifest.xml
+          test "$(grep -c '<uses-permission' app-v2/src/main/AndroidManifest.xml)" -eq 2
+          ! grep -R -E "PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY|BEGIN RSA PRIVATE KEY" core feature transport storage testing app-v2
+
+      - name: Lint and assemble candidate
+        working-directory: mobile-apk
+        run: |
+          set -euo pipefail
+          timeout 12m gradle --no-daemon --stacktrace --console=plain             :app-v2:lintDebug             :app-v2:assembleDebug
+
+      - name: Verify APK
+        working-directory: mobile-apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="app-v2/build/outputs/apk/debug/app-v2-debug.apk"
+          OUT="app-v2/build/outputs/apk/debug/ATLAS_Mobile_2_v0.2.0-alpha2-candidate1.apk"
+          test -s "$SRC"
+          cp "$SRC" "$OUT"
+          unzip -t "$OUT" >/dev/null
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose "$OUT"
+          sha256sum "$OUT" | tee "$OUT.sha256"
+          test -s "$OUT.sha256"
+          echo "G7_APK=PASS"
+          echo "LIVE_TRADING_ENABLED=NO"
+          echo "RESEARCH_ONLY=YES"
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ATLAS-Mobile-2-v0.2.0-alpha2-candidate1
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            mobile-apk/app-v2/build/outputs/apk/debug/ATLAS_Mobile_2_v0.2.0-alpha2-candidate1.apk
+            mobile-apk/app-v2/build/outputs/apk/debug/ATLAS_Mobile_2_v0.2.0-alpha2-candidate1.apk.sha256
