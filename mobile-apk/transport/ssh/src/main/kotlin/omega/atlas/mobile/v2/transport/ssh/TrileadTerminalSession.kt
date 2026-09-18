@@ -39,6 +39,12 @@ class TrileadTerminalSession(
         this.listener = listener
     }
 
+    fun pendingHostKeyObservation(): HostKeyObservation? = rejectedObservation
+
+    fun clearPendingHostKeyObservation() {
+        rejectedObservation = null
+    }
+
     override suspend fun connect(
         profile: ConnectionProfile,
         session: TerminalSessionDescriptor,

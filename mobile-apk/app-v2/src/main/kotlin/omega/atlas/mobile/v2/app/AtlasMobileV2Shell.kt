@@ -8,14 +8,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,10 +30,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
+import omega.atlas.mobile.v2.feature.terminal.KeyboardAction
+import omega.atlas.mobile.v2.feature.terminal.TerminalKeyEncoder
 import omega.atlas.mobile.v2.feature.terminal.TerminalWorkspaceChrome
+import org.connectbot.terminal.Terminal
+import org.connectbot.terminal.TerminalEmulator
 
 private enum class RootDestination(
     val title: String,
@@ -45,9 +55,16 @@ private enum class RootDestination(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AtlasMobileV2Shell() {
+fun AtlasMobileV2Shell(
+    emulator: TerminalEmulator,
+    runtime: AtlasTerminalRuntime,
+    onImportPrivateKey: (String?) -> Unit,
+) {
     var destination by remember { mutableStateOf(RootDestination.TERMINAL) }
     var secondaryTitle by remember { mutableStateOf<String?>(null) }
+    val state by runtime.state
+    val profile by runtime.profile
+    val message by runtime.message
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -57,7 +74,7 @@ fun AtlasMobileV2Shell() {
                     Column {
                         Text(secondaryTitle ?: destination.title)
                         Text(
-                            "ATLAS Mobile 2 • alpha2-dev",
+                            "${statusLabel(state)} • ${profile.title}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -87,11 +104,19 @@ fun AtlasMobileV2Shell() {
                 .fillMaxSize()
         ) {
             when {
+                secondaryTitle == "Подключения" -> ConnectionSetup(
+                    runtime = runtime,
+                    onBack = { secondaryTitle = null },
+                    onImportPrivateKey = onImportPrivateKey,
+                )
                 secondaryTitle != null -> SecondaryWorkspace(
                     title = secondaryTitle!!,
                     onBack = { secondaryTitle = null },
                 )
-                destination == RootDestination.TERMINAL -> TerminalHome()
+                destination == RootDestination.TERMINAL -> TerminalHome(
+                    emulator = emulator,
+                    runtime = runtime,
+                )
                 destination == RootDestination.CODE -> CodeHome()
                 destination == RootDestination.FILES -> FilesHome()
                 destination == RootDestination.ATLAS -> AtlasHome()
@@ -102,35 +127,224 @@ fun AtlasMobileV2Shell() {
 }
 
 @Composable
-private fun TerminalHome() {
-    TerminalWorkspaceChrome(
-        title = "Рабочая сессия",
-        state = TerminalLifecycleState.DISCONNECTED,
-        onKeyboardAction = {},
-        terminalContent = {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun TerminalHome(
+    emulator: TerminalEmulator,
+    runtime: AtlasTerminalRuntime,
+) {
+    val state by runtime.state
+    val profile by runtime.profile
+    val message by runtime.message
+    val pendingTrust by runtime.pendingTrust
+
+    Column(Modifier.fillMaxSize()) {
+        if (pendingTrust != null) {
+            val observation = pendingTrust!!
+            Card(Modifier.fillMaxWidth().padding(8.dp)) {
+                Column(
+                    Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Подтвердите SSH-сервер", style = MaterialTheme.typography.titleMedium)
+                    Text("${observation.host}:${observation.port}")
                     Text(
-                        ">_",
-                        style = MaterialTheme.typography.displaySmall,
+                        observation.fingerprint,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text("Терминал готов к подключению профиля")
-                    Text(
-                        "Параметры SSH больше не занимают рабочий экран",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Text(
+                        "Доверие не выдаётся автоматически. Сверьте отпечаток перед подтверждением.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = runtime::trustAndReconnect) {
+                        Text("Доверять и подключиться")
+                    }
                 }
             }
-        },
-    )
+        }
+
+        TerminalWorkspaceChrome(
+            title = profile.title,
+            state = state,
+            onKeyboardAction = { runtime.send(encodeKeyboardAction(it)) },
+            terminalContent = {
+                Terminal(
+                    terminalEmulator = emulator,
+                    modifier = Modifier.fillMaxSize(),
+                    keyboardEnabled = state == TerminalLifecycleState.READY,
+                    showSoftKeyboard = true,
+                    initialFontSize = 13.sp,
+                    backgroundColor = Color.Black,
+                    foregroundColor = Color(0xFFE6EDF3),
+                )
+            },
+            modifier = Modifier.weight(1f),
+        )
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state == TerminalLifecycleState.READY) {
+                OutlinedButton(onClick = runtime::disconnect) { Text("Отключить") }
+            } else if (pendingTrust == null) {
+                Button(onClick = runtime::connect) { Text("Подключить") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionSetup(
+    runtime: AtlasTerminalRuntime,
+    onBack: () -> Unit,
+    onImportPrivateKey: (String?) -> Unit,
+) {
+    val current by runtime.profile
+    val credentialStatus by runtime.credentialStatus
+    var title by remember(current.id) { mutableStateOf(current.title) }
+    var host by remember(current.id) { mutableStateOf(current.host) }
+    var port by remember(current.id) { mutableStateOf(current.port.toString()) }
+    var username by remember(current.id) { mutableStateOf(current.username) }
+    var password by remember { mutableStateOf("") }
+    var keyPassphrase by remember { mutableStateOf("") }
+    var autoConnect by remember(current.id) { mutableStateOf(current.autoConnect) }
+
+    LazyColumn(
+        Modifier
+            .fillMaxSize()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            OutlinedButton(onClick = onBack) { Text("← Назад") }
+        }
+        item {
+            Text("Профиль подключения", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "Эти параметры настраиваются один раз и больше не занимают экран терминала.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Название") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = host,
+                onValueChange = { host = it },
+                label = { Text("SSH-хост") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("Пользователь") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = port,
+                    onValueChange = { port = it.filter(Char::isDigit).take(5) },
+                    label = { Text("Порт") },
+                    singleLine = true,
+                    modifier = Modifier.weight(0.45f),
+                )
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = autoConnect, onCheckedChange = { autoConnect = it })
+                Text("Автоподключение после запуска (после успешной настройки)")
+            }
+        }
+        item {
+            Button(
+                onClick = {
+                    runtime.saveProfile(
+                        title = title,
+                        host = host,
+                        port = port.toIntOrNull() ?: 22,
+                        username = username,
+                        autoConnect = autoConnect,
+                    )
+                },
+                enabled = host.isNotBlank() && username.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Сохранить профиль") }
+        }
+        item {
+            Text("Данные доступа", style = MaterialTheme.typography.titleMedium)
+            Text(credentialStatus, style = MaterialTheme.typography.bodySmall)
+        }
+        item {
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("SSH-пароль") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            Button(
+                onClick = {
+                    runtime.savePassword(password)
+                    password = ""
+                },
+                enabled = password.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Сохранить пароль защищённо") }
+        }
+        item {
+            OutlinedTextField(
+                value = keyPassphrase,
+                onValueChange = { keyPassphrase = it },
+                label = { Text("Пароль приватного ключа, если есть") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            OutlinedButton(
+                onClick = { onImportPrivateKey(keyPassphrase.ifBlank { null }) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Импортировать приватный SSH-ключ") }
+        }
+        item {
+            OutlinedButton(
+                onClick = runtime::removeCredential,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Удалить сохранённые данные доступа") }
+        }
+        item {
+            Text(
+                "LIVE_TRADING_ENABLED = NO • RESEARCH_ONLY = YES",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable
@@ -192,20 +406,16 @@ private fun SecondaryWorkspace(title: String, onBack: () -> Unit) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Card(onClick = onBack) {
-            Text("← Назад", modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
-        }
+        OutlinedButton(onClick = onBack) { Text("← Назад") }
         WorkspacePlaceholder(
             title = title,
             subtitle = when (title) {
                 "Git" -> "Безопасный diff-first workflow; destructive-операции не выполняются автоматически"
-                "Подключения" -> "Настройка профиля вынесена из терминала и выполняется один раз"
                 "Мониторинг" -> "Послойная диагностика вместо ложного ONLINE"
                 else -> "Раздел включён в новый V2 shell"
             },
             glyph = when (title) {
                 "Git" -> "git"
-                "Подключения" -> "↔"
                 "Мониторинг" -> "◎"
                 else -> "•"
             },
@@ -241,4 +451,22 @@ private fun WorkspacePlaceholder(
             )
         }
     }
+}
+
+private fun encodeKeyboardAction(action: KeyboardAction): ByteArray = when (action) {
+    is KeyboardAction.Special -> TerminalKeyEncoder.encode(action.key)
+    is KeyboardAction.Control -> TerminalKeyEncoder.ctrl(action.character)
+    is KeyboardAction.TextInput -> action.text.encodeToByteArray()
+}
+
+private fun statusLabel(state: TerminalLifecycleState): String = when (state) {
+    TerminalLifecycleState.DISCONNECTED -> "Отключено"
+    TerminalLifecycleState.CONNECTING -> "Подключение"
+    TerminalLifecycleState.AUTHENTICATING -> "Проверка доступа"
+    TerminalLifecycleState.OPENING_PTY -> "Открытие PTY"
+    TerminalLifecycleState.ATTACHING_TMUX -> "Восстановление tmux"
+    TerminalLifecycleState.READY -> "Терминал готов"
+    TerminalLifecycleState.RECONNECTING -> "Восстановление связи"
+    TerminalLifecycleState.BLOCKED -> "Требуется подтверждение"
+    TerminalLifecycleState.ERROR -> "Ошибка"
 }
