@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -36,6 +37,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
+import omega.atlas.mobile.v2.feature.editor.CodeEditorScreen
+import omega.atlas.mobile.v2.feature.editor.CodeToTerminalAction
 import omega.atlas.mobile.v2.feature.terminal.KeyboardAction
 import omega.atlas.mobile.v2.feature.terminal.TerminalKeyEncoder
 import omega.atlas.mobile.v2.feature.terminal.TerminalWorkspaceChrome
@@ -117,8 +120,11 @@ fun AtlasMobileV2Shell(
                     emulator = emulator,
                     runtime = runtime,
                 )
-                destination == RootDestination.CODE -> CodeHome()
-                destination == RootDestination.FILES -> FilesHome()
+                destination == RootDestination.CODE -> CodeHome(runtime)
+                destination == RootDestination.FILES -> FilesHome(
+                    runtime = runtime,
+                    onFileOpened = { destination = RootDestination.CODE },
+                )
                 destination == RootDestination.ATLAS -> AtlasHome()
                 else -> MoreHome(onOpen = { secondaryTitle = it })
             }
@@ -348,18 +354,120 @@ private fun ConnectionSetup(
 }
 
 @Composable
-private fun CodeHome() = WorkspacePlaceholder(
-    title = "Редактор кода",
-    subtitle = "Открытие path:line, сохранение с conflict guard и отправка в терминал",
-    glyph = "{ }",
-)
+private fun CodeHome(runtime: AtlasTerminalRuntime) {
+    val editor by runtime.editor
+    val fileMessage by runtime.filesMessage
+
+    if (!editor.loaded) {
+        WorkspacePlaceholder(
+            title = if (editor.path.isBlank()) "Редактор кода" else editor.path,
+            subtitle = if (editor.path.isBlank()) {
+                "Откройте файл в разделе «Файлы»"
+            } else {
+                fileMessage
+            },
+            glyph = "{ }",
+        )
+        return
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        CodeEditorScreen(
+            path = editor.path,
+            text = editor.text,
+            dirty = editor.dirty,
+            onTextChange = runtime::updateEditorText,
+            onSave = runtime::saveEditor,
+            onTerminalAction = { action, _ ->
+                runtime.insertEditorIntoTerminal(action == CodeToTerminalAction.RUN)
+            },
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (editor.saving) "Сохранение…" else fileMessage,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 @Composable
-private fun FilesHome() = WorkspacePlaceholder(
-    title = "Файлы",
-    subtitle = "Удалённое дерево проекта через защищённый SFTP",
-    glyph = "▤",
-)
+private fun FilesHome(
+    runtime: AtlasTerminalRuntime,
+    onFileOpened: () -> Unit,
+) {
+    val path by runtime.directoryPath
+    val entries by runtime.files
+    val message by runtime.filesMessage
+    val busy by runtime.filesBusy
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(
+                onClick = runtime::openParentDirectory,
+                enabled = path != "/" && !busy,
+            ) { Text("↑") }
+            Text(
+                path,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 2,
+            )
+            Button(
+                onClick = { runtime.refreshFiles() },
+                enabled = !busy,
+            ) { Text(if (busy) "…" else "Обновить") }
+        }
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            items(entries, key = { it.path }) { entry ->
+                Surface(
+                    tonalElevation = if (entry.directory) 1.dp else 0.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !busy) {
+                            runtime.openRemoteEntry(entry, onFileOpened)
+                        },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(if (entry.directory) "▸" else "·", modifier = Modifier.padding(end = 8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(entry.name)
+                            if (!entry.directory) {
+                                Text(
+                                    "${entry.sizeBytes} байт",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Text(
+            message,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 @Composable
 private fun AtlasHome() = WorkspacePlaceholder(
