@@ -19,12 +19,14 @@ import omega.atlas.mobile.v2.core.security.SshCredential
 import omega.atlas.mobile.v2.feature.files.AtomicTextWriteRequest
 import omega.atlas.mobile.v2.feature.files.RemoteFileEntry
 import omega.atlas.mobile.v2.feature.files.RemoteTextDocument
+import omega.atlas.mobile.v2.feature.git.GitSnapshot
 import omega.atlas.mobile.v2.feature.sessions.TerminalSessionCoordinator
 import omega.atlas.mobile.v2.feature.terminal.TerminalSessionPort
 import omega.atlas.mobile.v2.storage.local.AndroidKeystoreCredentialVault
 import omega.atlas.mobile.v2.storage.local.SharedPreferencesConnectionProfileStore
 import omega.atlas.mobile.v2.storage.local.SharedPreferencesHostKeyStore
 import omega.atlas.mobile.v2.transport.sftp.TrileadRemoteFilesPort
+import omega.atlas.mobile.v2.transport.ssh.TrileadCommandRunner
 import omega.atlas.mobile.v2.transport.ssh.TrileadTerminalSession
 import org.connectbot.terminal.TerminalEmulator
 
@@ -47,7 +49,9 @@ class AtlasTerminalRuntime(
     private val vault = AndroidKeystoreCredentialVault(appContext)
     private val hostKeyPolicy = PinnedHostKeyTrustPolicy(SharedPreferencesHostKeyStore(appContext))
     private val transport = TrileadTerminalSession(vault, hostKeyPolicy)
+    private val commandRunner = TrileadCommandRunner(vault, hostKeyPolicy)
     private val coordinator = TerminalSessionCoordinator(transport)
+    private val gitRepository = SshGitRepository({ _profile.value }, commandRunner)
 
     private val _profile = mutableStateOf(profileStore.load() ?: defaultProfile())
     val profile: State<ConnectionProfile> = _profile
@@ -80,6 +84,21 @@ class AtlasTerminalRuntime(
     val editor: State<EditorUiState> = _editor
 
     private var editorDocument: RemoteTextDocument? = null
+
+    private val _gitSnapshot = mutableStateOf(GitSnapshot(branch = "—"))
+    val gitSnapshot: State<GitSnapshot> = _gitSnapshot
+
+    private val _gitSelectedPath = mutableStateOf<String?>(null)
+    val gitSelectedPath: State<String?> = _gitSelectedPath
+
+    private val _gitDiff = mutableStateOf<String?>(null)
+    val gitDiff: State<String?> = _gitDiff
+
+    private val _gitMessage = mutableStateOf("Нажмите «Обновить Git»")
+    val gitMessage: State<String> = _gitMessage
+
+    private val _gitBusy = mutableStateOf(false)
+    val gitBusy: State<Boolean> = _gitBusy
 
     init {
         transport.setListener(this)
@@ -333,6 +352,75 @@ class AtlasTerminalRuntime(
         send(payload.encodeToByteArray())
     }
 
+    fun refreshGit() {
+        scope.launch { _gitBusy.value = true; _gitMessage.value = "Чтение Git status…" }
+        scope.launch(Dispatchers.IO) {
+            when (val result = gitRepository.status(DEFAULT_WORKSPACE_ROOT)) {
+                is AtlasResult.Success -> scope.launch {
+                    _gitSnapshot.value = result.value
+                    _gitMessage.value = if (result.value.isClean) "Рабочее дерево чистое" else "${result.value.changes.size} изменений"
+                    _gitBusy.value = false
+                }
+                is AtlasResult.Failure -> scope.launch {
+                    _gitMessage.value = gitErrorMessage(result.error.technicalDetail)
+                    _gitBusy.value = false
+                }
+            }
+        }
+    }
+
+    fun selectGitPath(path: String) {
+        _gitSelectedPath.value = path
+        _gitDiff.value = "Загрузка diff…"
+        scope.launch(Dispatchers.IO) {
+            when (val result = gitRepository.diff(DEFAULT_WORKSPACE_ROOT, path)) {
+                is AtlasResult.Success -> scope.launch { _gitDiff.value = result.value.unifiedDiff }
+                is AtlasResult.Failure -> scope.launch { _gitDiff.value = gitErrorMessage(result.error.technicalDetail) }
+            }
+        }
+    }
+
+    fun stageGit(path: String) {
+        gitMutation("Добавление в stage…") { gitRepository.stage(DEFAULT_WORKSPACE_ROOT, path) }
+    }
+
+    fun unstageGit(path: String) {
+        gitMutation("Удаление из stage…") { gitRepository.unstage(DEFAULT_WORKSPACE_ROOT, path) }
+    }
+
+    fun commitGit(message: String) {
+        scope.launch { _gitBusy.value = true; _gitMessage.value = "Создание commit…" }
+        scope.launch(Dispatchers.IO) {
+            when (val result = gitRepository.commit(DEFAULT_WORKSPACE_ROOT, message)) {
+                is AtlasResult.Success -> scope.launch {
+                    _gitMessage.value = "Commit создан: ${result.value.take(12)}"
+                    _gitBusy.value = false
+                    refreshGit()
+                }
+                is AtlasResult.Failure -> scope.launch {
+                    _gitMessage.value = gitErrorMessage(result.error.technicalDetail)
+                    _gitBusy.value = false
+                }
+            }
+        }
+    }
+
+    private fun gitMutation(label: String, action: suspend () -> AtlasResult<Unit>) {
+        scope.launch { _gitBusy.value = true; _gitMessage.value = label }
+        scope.launch(Dispatchers.IO) {
+            when (val result = action()) {
+                is AtlasResult.Success -> scope.launch {
+                    _gitBusy.value = false
+                    refreshGit()
+                }
+                is AtlasResult.Failure -> scope.launch {
+                    _gitMessage.value = gitErrorMessage(result.error.technicalDetail)
+                    _gitBusy.value = false
+                }
+            }
+        }
+    }
+
     override fun onStateChanged(state: TerminalLifecycleState) {
         postState(state)
         if (state == TerminalLifecycleState.READY) {
@@ -381,6 +469,9 @@ class AtlasTerminalRuntime(
         "sftp_host_key_blocked" -> "SFTP заблокирован: требуется подтверждение SSH-ключа"
         else -> "Ошибка файлов: ${detail ?: code}"
     }
+
+    private fun gitErrorMessage(detail: String?): String =
+        "Git: " + (detail?.lineSequence()?.firstOrNull()?.take(220) ?: "операция не выполнена")
 
     private fun userMessage(code: String, detail: String?): String = when (code) {
         "ssh_auth_failed" -> "Не удалось выполнить SSH-аутентификацию"

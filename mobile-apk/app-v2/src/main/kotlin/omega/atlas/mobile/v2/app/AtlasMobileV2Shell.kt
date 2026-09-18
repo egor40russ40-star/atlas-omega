@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
 import omega.atlas.mobile.v2.feature.editor.CodeEditorScreen
 import omega.atlas.mobile.v2.feature.editor.CodeToTerminalAction
+import omega.atlas.mobile.v2.feature.git.GitScreen
 import omega.atlas.mobile.v2.feature.terminal.KeyboardAction
 import omega.atlas.mobile.v2.feature.terminal.TerminalKeyEncoder
 import omega.atlas.mobile.v2.feature.terminal.TerminalWorkspaceChrome
@@ -107,6 +109,10 @@ fun AtlasMobileV2Shell(
                 .fillMaxSize()
         ) {
             when {
+                secondaryTitle == "Git" -> GitHome(
+                    runtime = runtime,
+                    onBack = { secondaryTitle = null },
+                )
                 secondaryTitle == "Подключения" -> ConnectionSetup(
                     runtime = runtime,
                     onBack = { secondaryTitle = null },
@@ -503,6 +509,83 @@ private fun MoreHome(onOpen: (String) -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun GitHome(
+    runtime: AtlasTerminalRuntime,
+    onBack: () -> Unit,
+) {
+    val snapshot by runtime.gitSnapshot
+    val selectedPath by runtime.gitSelectedPath
+    val diff by runtime.gitDiff
+    val message by runtime.gitMessage
+    val busy by runtime.gitBusy
+    var showCommitDialog by remember { mutableStateOf(false) }
+    var commitMessage by remember { mutableStateOf("") }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = onBack) { Text("← Назад") }
+            Text(
+                message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = runtime::refreshGit, enabled = !busy) {
+                Text(if (busy) "…" else "Обновить Git")
+            }
+        }
+
+        GitScreen(
+            snapshot = snapshot,
+            selectedPath = selectedPath,
+            diffText = diff,
+            onSelectFile = runtime::selectGitPath,
+            onStage = runtime::stageGit,
+            onUnstage = runtime::unstageGit,
+            onCommitRequested = { showCommitDialog = true },
+            modifier = Modifier.weight(1f),
+        )
+    }
+
+    if (showCommitDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) showCommitDialog = false },
+            title = { Text("Создать Git commit") },
+            text = {
+                OutlinedTextField(
+                    value = commitMessage,
+                    onValueChange = { commitMessage = it.take(200) },
+                    label = { Text("Сообщение commit") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        runtime.commitGit(commitMessage)
+                        commitMessage = ""
+                        showCommitDialog = false
+                    },
+                    enabled = commitMessage.isNotBlank() && !busy,
+                ) { Text("Создать") }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showCommitDialog = false },
+                    enabled = !busy,
+                ) { Text("Отмена") }
+            },
+        )
     }
 }
 
