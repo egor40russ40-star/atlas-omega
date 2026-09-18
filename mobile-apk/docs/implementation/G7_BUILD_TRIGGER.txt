@@ -1,0 +1,3 @@
+G7 candidate build trigger
+source=67e983c3cffda9120be5efe80b107086fafc1c63
+candidate=0.2.0-alpha2-candidate1
