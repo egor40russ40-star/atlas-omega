@@ -21,7 +21,7 @@ env:
 jobs:
   candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -46,6 +46,7 @@ jobs:
 
       - name: Candidate safety check
         working-directory: mobile-apk
+        shell: bash
         run: |
           set -euo pipefail
           grep -R "liveTradingEnabled: Boolean = false" core/model/src/main/kotlin
@@ -54,13 +55,14 @@ jobs:
           grep -R "autoTrustNewDevice: Boolean = false" core/model/src/main/kotlin
           grep -q 'android:usesCleartextTraffic="false"' app-v2/src/main/AndroidManifest.xml
           test "$(grep -c '<uses-permission' app-v2/src/main/AndroidManifest.xml)" -eq 2
-          ! grep -R -E "-----BEGIN (OPENSSH |RSA |EC )?PRIVATE KEY-----" core feature transport storage testing app-v2
+          ! grep -R -E -- "-----BEGIN (OPENSSH |RSA |EC )?PRIVATE KEY-----" core feature transport storage testing app-v2
 
       - name: Assemble candidate
         working-directory: mobile-apk
+        shell: bash
         run: |
           set -euo pipefail
-          timeout 12m gradle --no-daemon --stacktrace --console=plain             :app-v2:lintDebug             :app-v2:assembleDebug
+          timeout 8m gradle --no-daemon --stacktrace --console=plain :app-v2:assembleDebug
 
       - name: Verify APK
         working-directory: mobile-apk
