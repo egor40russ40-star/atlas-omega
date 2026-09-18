@@ -56,7 +56,7 @@ jobs:
           test "$(grep -c '<uses-permission' app-v2/src/main/AndroidManifest.xml)" -eq 2
           ! grep -R -E "-----BEGIN (OPENSSH |RSA |EC )?PRIVATE KEY-----" core feature transport storage testing app-v2
 
-      - name: Lint and assemble candidate
+      - name: Assemble candidate
         working-directory: mobile-apk
         run: |
           set -euo pipefail
