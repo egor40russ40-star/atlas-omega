@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "AtlasMobileV2"
 
 include ':app'
+include ':app-v2'
 include ':core:model'
 include ':core:result'
 include ':core:security'
