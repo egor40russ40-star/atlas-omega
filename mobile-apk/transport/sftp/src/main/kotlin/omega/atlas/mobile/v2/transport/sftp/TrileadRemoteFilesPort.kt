@@ -12,6 +12,7 @@ import omega.atlas.mobile.v2.core.model.RemoteFileSnapshot
 import omega.atlas.mobile.v2.core.result.AtlasError
 import omega.atlas.mobile.v2.core.result.AtlasResult
 import omega.atlas.mobile.v2.core.result.ErrorDomain
+import omega.atlas.mobile.v2.core.result.TransportFailureClassifier
 import omega.atlas.mobile.v2.core.security.CredentialVault
 import omega.atlas.mobile.v2.core.security.HostKeyDecision
 import omega.atlas.mobile.v2.core.security.HostKeyObservation
@@ -145,90 +146,137 @@ class TrileadRemoteFilesPort(
             is AtlasResult.Failure -> return loaded
         }
 
-        var connection: Connection? = null
-        var client: SFTPv3Client? = null
-        var rejectedObservation: HostKeyObservation? = null
-
         return try {
-            val conn = Connection(profile.host, profile.port)
-            connection = conn
-            val verifier = ServerHostKeyVerifier { host, port, algorithm, key ->
-                val observation = HostKeyObservation(
-                    host = host,
-                    port = port,
-                    algorithm = algorithm,
-                    fingerprint = fingerprint(key),
-                )
-                when (trustPolicy.evaluate(observation)) {
-                    HostKeyDecision.TRUSTED -> true
-                    HostKeyDecision.UNSEEN,
-                    HostKeyDecision.CHANGED -> {
-                        rejectedObservation = observation
-                        false
+            when (val opened = openClient(credential)) {
+                is AtlasResult.Failure -> opened
+                is AtlasResult.Success -> {
+                    val connected = opened.value
+                    try {
+                        AtlasResult.Success(block(connected.client))
+                    } catch (_: RemoteConflictException) {
+                        failure(
+                            "file_changed_remotely",
+                            ErrorDomain.FILE_CONFLICT,
+                            "error_file_changed_remotely",
+                            retryable = false,
+                        )
+                    } catch (err: FileTooLargeException) {
+                        failure(
+                            "file_too_large",
+                            ErrorDomain.VALIDATION,
+                            "error_file_too_large",
+                            detail = "${err.actualBytes}>${err.limitBytes}",
+                            retryable = false,
+                        )
+                    } catch (err: Exception) {
+                        failure(
+                            "sftp_operation_failed",
+                            ErrorDomain.SFTP,
+                            "error_sftp_operation_failed",
+                            detail = err.javaClass.simpleName + ": " + (err.message ?: "operation"),
+                            retryable = false,
+                        )
+                    } finally {
+                        runCatching { connected.client.close() }
+                        runCatching { connected.connection.close() }
                     }
                 }
             }
-            conn.connect(verifier, 10_000, 15_000)
-
-            val authenticated = when (credential) {
-                SshCredential.None -> conn.authenticateWithNone(profile.username)
-                is SshCredential.Password -> conn.authenticateWithPassword(
-                    profile.username,
-                    credential.value.concatToString(),
-                )
-                is SshCredential.PrivateKey -> conn.authenticateWithPublicKey(
-                    profile.username,
-                    credential.pem,
-                    credential.passphrase?.concatToString(),
-                )
-            }
-            if (!authenticated) {
-                return failure("sftp_auth_failed", ErrorDomain.AUTH, "error_sftp_auth_failed")
-            }
-
-            val sftp = SFTPv3Client(conn)
-            client = sftp
-            sftp.setCharset("UTF-8")
-            AtlasResult.Success(block(sftp))
-        } catch (_: RemoteConflictException) {
-            failure(
-                "file_changed_remotely",
-                ErrorDomain.FILE_CONFLICT,
-                "error_file_changed_remotely",
-                retryable = false,
-            )
-        } catch (err: FileTooLargeException) {
-            failure(
-                "file_too_large",
-                ErrorDomain.VALIDATION,
-                "error_file_too_large",
-                detail = "${err.actualBytes}>${err.limitBytes}",
-                retryable = false,
-            )
-        } catch (err: Exception) {
-            val blocked = rejectedObservation
-            if (blocked != null) {
-                failure(
-                    "sftp_host_key_blocked",
-                    ErrorDomain.TRUST,
-                    "error_sftp_host_key_blocked",
-                    detail = "${blocked.host}:${blocked.port} ${blocked.algorithm} ${blocked.fingerprint}",
-                    retryable = false,
-                )
-            } else {
-                failure(
-                    "sftp_operation_failed",
-                    ErrorDomain.SFTP,
-                    "error_sftp_operation_failed",
-                    detail = err.message,
-                    retryable = true,
-                )
-            }
         } finally {
-            runCatching { client?.close() }
-            runCatching { connection?.close() }
             wipeCredential(credential)
         }
+    }
+
+    private fun openClient(credential: SshCredential): AtlasResult<ConnectedSftp> {
+        var lastTransportFailure: AtlasResult.Failure? = null
+        val endpoints = profile.sshEndpoints()
+
+        for ((index, endpoint) in endpoints.withIndex()) {
+            var connection: Connection? = null
+            var rejectedObservation: HostKeyObservation? = null
+            try {
+                val conn = Connection(endpoint.host, endpoint.port)
+                connection = conn
+                val verifier = ServerHostKeyVerifier { host, port, algorithm, key ->
+                    val observation = HostKeyObservation(
+                        host = host,
+                        port = port,
+                        algorithm = algorithm,
+                        fingerprint = fingerprint(key),
+                    )
+                    when (trustPolicy.evaluate(observation)) {
+                        HostKeyDecision.TRUSTED -> true
+                        HostKeyDecision.UNSEEN,
+                        HostKeyDecision.CHANGED -> {
+                            rejectedObservation = observation
+                            false
+                        }
+                    }
+                }
+                conn.connect(verifier, 10_000, 15_000)
+
+                val authenticated = when (credential) {
+                    SshCredential.None -> conn.authenticateWithNone(profile.username)
+                    is SshCredential.Password -> conn.authenticateWithPassword(
+                        profile.username,
+                        credential.value.concatToString(),
+                    )
+                    is SshCredential.PrivateKey -> conn.authenticateWithPublicKey(
+                        profile.username,
+                        credential.pem,
+                        credential.passphrase?.concatToString(),
+                    )
+                }
+                if (!authenticated) {
+                    runCatching { conn.close() }
+                    return failure(
+                        "sftp_auth_failed",
+                        ErrorDomain.AUTH,
+                        "error_sftp_auth_failed",
+                    )
+                }
+
+                val sftp = SFTPv3Client(conn)
+                sftp.setCharset("UTF-8")
+                return AtlasResult.Success(ConnectedSftp(conn, sftp))
+            } catch (err: Exception) {
+                runCatching { connection?.close() }
+                val blocked = rejectedObservation
+                if (blocked != null) {
+                    return failure(
+                        "sftp_host_key_blocked",
+                        ErrorDomain.TRUST,
+                        "error_sftp_host_key_blocked",
+                        detail = "${blocked.host}:${blocked.port} ${blocked.algorithm} ${blocked.fingerprint}",
+                        retryable = false,
+                    )
+                }
+
+                val classified = TransportFailureClassifier.classify(err)
+                val failure = failure<ConnectedSftp>(
+                    classified.code,
+                    classified.domain,
+                    "error_sftp_connect_failed",
+                    detail = "${endpoint.label} ${endpoint.host}:${endpoint.port} • " +
+                        err.javaClass.simpleName + ": " + (err.message ?: "transport"),
+                    retryable = classified.retryable,
+                )
+                if (failure is AtlasResult.Failure) lastTransportFailure = failure
+
+                val mayFallback =
+                    classified.domain == ErrorDomain.NETWORK &&
+                        classified.retryable &&
+                        index < endpoints.lastIndex
+                if (!mayFallback) return failure
+            }
+        }
+
+        return lastTransportFailure
+            ?: failure(
+                "network_transport_failed",
+                ErrorDomain.NETWORK,
+                "error_sftp_connect_failed",
+            )
     }
 
     private fun wipeCredential(credential: SshCredential) {
@@ -260,6 +308,11 @@ class TrileadRemoteFilesPort(
         retryable: Boolean = false,
     ): AtlasResult<T> = AtlasResult.Failure(
         AtlasError(code, domain, messageKey, detail, retryable)
+    )
+
+    private data class ConnectedSftp(
+        val connection: Connection,
+        val client: SFTPv3Client,
     )
 
     private class RemoteConflictException : RuntimeException()
