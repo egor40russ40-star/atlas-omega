@@ -32,14 +32,15 @@ class TrileadRemoteFilesPort(
 
     override suspend fun list(path: String): AtlasResult<List<RemoteFileEntry>> =
         withClient { client ->
+            val safePath = requireWorkspacePath(client, path)
             @Suppress("UNCHECKED_CAST")
-            val entries = client.ls(path) as java.util.Vector<SFTPv3DirectoryEntry>
+            val entries = client.ls(safePath) as java.util.Vector<SFTPv3DirectoryEntry>
             entries.asSequence()
                 .filter { it.filename != "." && it.filename != ".." }
                 .map { entry ->
                     val attrs = entry.attributes
                     RemoteFileEntry(
-                        path = SftpPath.child(path, entry.filename),
+                        path = SftpPath.child(safePath, entry.filename),
                         name = entry.filename,
                         directory = attrs?.isDirectory ?: false,
                         sizeBytes = attrs?.size ?: 0L,
@@ -52,13 +53,14 @@ class TrileadRemoteFilesPort(
 
     override suspend fun readText(path: String): AtlasResult<RemoteTextDocument> =
         withClient { client ->
-            val attrs = client.stat(path)
+            val safePath = requireWorkspacePath(client, path)
+            val attrs = client.stat(safePath)
             val size = attrs.size ?: 0L
             if (size > maxTextBytes) throw FileTooLargeException(size, maxTextBytes)
 
-            val bytes = readAll(client, path, size)
+            val bytes = readAll(client, safePath, size)
             val snapshot = RemoteFileSnapshot(
-                path = path,
+                path = safePath,
                 sizeBytes = bytes.size.toLong(),
                 modifiedEpochMillis = (attrs.mtime ?: 0L) * 1000L,
                 contentHash = sha256Hex(bytes),
@@ -70,14 +72,16 @@ class TrileadRemoteFilesPort(
         request: AtomicTextWriteRequest,
     ): AtlasResult<RemoteFileSnapshot> =
         withClient { client ->
-            verifyExpectedSnapshot(client, request.expectedSnapshot)
+            val safePath = requireWorkspacePath(client, request.path)
+            val safeExpected = request.expectedSnapshot.copy(path = safePath)
+            verifyExpectedSnapshot(client, safeExpected)
 
             val payload = request.text.toByteArray(Charsets.UTF_8)
             val nonce = sha256Hex(
-                (request.path + ":" + request.expectedSnapshot.modifiedEpochMillis + ":" + payload.size)
+                (safePath + ":" + request.expectedSnapshot.modifiedEpochMillis + ":" + payload.size)
                     .toByteArray(Charsets.UTF_8)
             ).take(16)
-            val temporary = SftpPath.temporaryFor(request.path, nonce)
+            val temporary = SftpPath.temporaryFor(safePath, nonce)
 
             var tempCreated = false
             try {
@@ -89,12 +93,12 @@ class TrileadRemoteFilesPort(
                     client.closeFile(handle)
                 }
 
-                client.mv(temporary, request.path)
+                client.mv(temporary, safePath)
                 tempCreated = false
 
-                val attrs = client.stat(request.path)
+                val attrs = client.stat(safePath)
                 RemoteFileSnapshot(
-                    path = request.path,
+                    path = safePath,
                     sizeBytes = attrs.size ?: payload.size.toLong(),
                     modifiedEpochMillis = (attrs.mtime ?: 0L) * 1000L,
                     contentHash = sha256Hex(payload),
@@ -103,6 +107,14 @@ class TrileadRemoteFilesPort(
                 if (tempCreated) runCatching { client.rm(temporary) }
             }
         }
+
+    private fun requireWorkspacePath(client: SFTPv3Client, path: String): String {
+        val root = client.canonicalPath(profile.workspaceRoot).trimEnd('/').ifBlank { "/" }
+        val canonical = client.canonicalPath(path).trimEnd('/').ifBlank { "/" }
+        val within = root == "/" || canonical == root || canonical.startsWith("$root/")
+        if (!within) throw WorkspaceBoundaryException(canonical, root)
+        return canonical
+    }
 
     private fun verifyExpectedSnapshot(client: SFTPv3Client, expected: RemoteFileSnapshot) {
         val attrs = client.stat(expected.path)
@@ -153,6 +165,14 @@ class TrileadRemoteFilesPort(
                     val connected = opened.value
                     try {
                         AtlasResult.Success(block(connected.client))
+                    } catch (err: WorkspaceBoundaryException) {
+                        failure(
+                            "file_outside_workspace",
+                            ErrorDomain.VALIDATION,
+                            "error_file_outside_workspace",
+                            detail = "${err.path} outside ${err.root}",
+                            retryable = false,
+                        )
                     } catch (_: RemoteConflictException) {
                         failure(
                             "file_changed_remotely",
@@ -314,6 +334,11 @@ class TrileadRemoteFilesPort(
         val connection: Connection,
         val client: SFTPv3Client,
     )
+
+    private class WorkspaceBoundaryException(
+        val path: String,
+        val root: String,
+    ) : RuntimeException()
 
     private class RemoteConflictException : RuntimeException()
     private class FileTooLargeException(

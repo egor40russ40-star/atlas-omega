@@ -27,6 +27,7 @@ import omega.atlas.mobile.v2.feature.atlas.GatewayVersion
 import omega.atlas.mobile.v2.feature.files.AtomicTextWriteRequest
 import omega.atlas.mobile.v2.feature.files.RemoteFileEntry
 import omega.atlas.mobile.v2.feature.files.RemoteTextDocument
+import omega.atlas.mobile.v2.feature.files.WorkspacePathPolicy
 import omega.atlas.mobile.v2.feature.git.GitSnapshot
 import omega.atlas.mobile.v2.feature.sessions.TerminalSessionCoordinator
 import omega.atlas.mobile.v2.feature.terminal.TerminalSessionPort
@@ -367,7 +368,12 @@ class AtlasTerminalRuntime(
     }
 
     fun refreshFiles(path: String = _directoryPath.value) {
-        val normalized = normalizeRemotePath(path)
+        val normalized = try {
+            WorkspacePathPolicy.resolve(currentWorkspaceRoot(), path)
+        } catch (_: IllegalArgumentException) {
+            _filesMessage.value = "Путь вне разрешённого workspace заблокирован"
+            return
+        }
         scope.launch {
             _filesBusy.value = true
             _filesMessage.value = "Загрузка…"
@@ -389,22 +395,31 @@ class AtlasTerminalRuntime(
     }
 
     fun openParentDirectory() {
-        val current = _directoryPath.value
-        val parent = current.trimEnd('/').substringBeforeLast('/', missingDelimiterValue = "/").ifBlank { "/" }
-        refreshFiles(parent)
+        refreshFiles(
+            WorkspacePathPolicy.parent(
+                root = currentWorkspaceRoot(),
+                current = _directoryPath.value,
+            )
+        )
     }
 
     fun openRemoteEntry(entry: RemoteFileEntry, onFileReady: () -> Unit = {}) {
+        val safePath = try {
+            WorkspacePathPolicy.resolve(currentWorkspaceRoot(), entry.path)
+        } catch (_: IllegalArgumentException) {
+            _filesMessage.value = "Открытие вне разрешённого workspace заблокировано"
+            return
+        }
         if (entry.directory) {
-            refreshFiles(entry.path)
+            refreshFiles(safePath)
             return
         }
         scope.launch {
-            _editor.value = EditorUiState(path = entry.path)
+            _editor.value = EditorUiState(path = safePath)
             _filesMessage.value = "Открытие ${entry.name}…"
         }
         scope.launch(Dispatchers.IO) {
-            when (val result = remoteFilesPort().readText(entry.path)) {
+            when (val result = remoteFilesPort().readText(safePath)) {
                 is AtlasResult.Success -> scope.launch {
                     editorDocument = result.value
                     _editor.value = EditorUiState(
@@ -417,7 +432,7 @@ class AtlasTerminalRuntime(
                     onFileReady()
                 }
                 is AtlasResult.Failure -> scope.launch {
-                    _editor.value = EditorUiState(path = entry.path)
+                    _editor.value = EditorUiState(path = safePath)
                     _filesMessage.value = filesErrorMessage(result.error.code, result.error.technicalDetail)
                 }
             }
@@ -434,6 +449,10 @@ class AtlasTerminalRuntime(
         val current = _editor.value
         val document = editorDocument ?: return
         if (!current.loaded || !current.dirty || current.saving) return
+        if (!WorkspacePathPolicy.isWithin(currentWorkspaceRoot(), current.path)) {
+            _filesMessage.value = "Сохранение вне разрешённого workspace заблокировано"
+            return
+        }
 
         _editor.value = current.copy(saving = true)
         scope.launch(Dispatchers.IO) {
@@ -774,6 +793,7 @@ class AtlasTerminalRuntime(
     private fun filesErrorMessage(code: String, detail: String?): String = when (code) {
         "file_changed_remotely" -> "Файл изменился на NucBox. Перезагрузите его перед сохранением."
         "file_too_large" -> "Файл слишком большой для мобильного редактора"
+        "file_outside_workspace" -> "Доступ вне разрешённого workspace заблокирован"
         "sftp_auth_failed" -> "SFTP: проверьте данные SSH-доступа"
         "sftp_host_key_blocked" -> "SFTP заблокирован: требуется подтверждение SSH-ключа"
         else -> "Ошибка файлов: ${detail ?: code}"

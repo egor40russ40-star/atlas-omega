@@ -1,6 +1,8 @@
 package omega.atlas.mobile.v2.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -646,6 +649,9 @@ private fun FilesHome(
     val entries by runtime.files
     val message by runtime.filesMessage
     val busy by runtime.filesBusy
+    val profile by runtime.profile
+    var showHidden by remember(profile.id) { mutableStateOf(false) }
+    val visibleEntries = if (showHidden) entries else entries.filterNot { it.name.startsWith(".") }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -657,7 +663,7 @@ private fun FilesHome(
         ) {
             OutlinedButton(
                 onClick = runtime::openParentDirectory,
-                enabled = path != "/" && !busy,
+                enabled = path != profile.workspaceRoot && !busy,
             ) { Text("↑") }
             Text(
                 path,
@@ -666,17 +672,28 @@ private fun FilesHome(
                 fontFamily = FontFamily.Monospace,
                 maxLines = 2,
             )
+            OutlinedButton(
+                onClick = { showHidden = !showHidden },
+                enabled = !busy,
+            ) { Text(if (showHidden) "Скрытые ✓" else "Скрытые") }
             Button(
                 onClick = { runtime.refreshFiles() },
                 enabled = !busy,
             ) { Text(if (busy) "…" else "Обновить") }
         }
 
+        WorkspaceBreadcrumbs(
+            root = profile.workspaceRoot,
+            path = path,
+            enabled = !busy,
+            onNavigate = runtime::refreshFiles,
+        )
+
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            items(entries, key = { it.path }) { entry ->
+            items(visibleEntries, key = { it.path }) { entry ->
                 Surface(
                     tonalElevation = if (entry.directory) 1.dp else 0.dp,
                     modifier = Modifier
@@ -711,6 +728,42 @@ private fun FilesHome(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun WorkspaceBreadcrumbs(
+    root: String,
+    path: String,
+    enabled: Boolean,
+    onNavigate: (String) -> Unit,
+) {
+    val rootClean = root.trimEnd('/').ifBlank { "/" }
+    val relative = path.removePrefix(rootClean).trim('/')
+    val parts = relative.split('/').filter { it.isNotBlank() }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        AssistChip(
+            onClick = { onNavigate(rootClean) },
+            enabled = enabled,
+            label = { Text("workspace") },
+        )
+        var current = rootClean
+        parts.forEach { part ->
+            current = if (current == "/") "/$part" else "$current/$part"
+            val target = current
+            AssistChip(
+                onClick = { onNavigate(target) },
+                enabled = enabled,
+                label = { Text(part) },
+            )
+        }
     }
 }
 
