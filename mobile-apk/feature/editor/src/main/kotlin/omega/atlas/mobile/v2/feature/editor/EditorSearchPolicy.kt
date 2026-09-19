@@ -6,6 +6,11 @@ data class EditorMatch(
     val line: Int,
 )
 
+data class EditorCursorLocation(
+    val line: Int,
+    val column: Int,
+)
+
 object EditorSearchPolicy {
     fun findAll(
         text: String,
@@ -42,4 +47,14 @@ object EditorSearchPolicy {
 
     fun lineCount(text: String): Int =
         if (text.isEmpty()) 1 else 1 + text.count { it == '\n' }
+
+    fun locationAt(text: String, offset: Int): EditorCursorLocation {
+        val safeOffset = offset.coerceIn(0, text.length)
+        val before = text.substring(0, safeOffset)
+        val lastBreak = before.lastIndexOf('\n')
+        return EditorCursorLocation(
+            line = 1 + before.count { it == '\n' },
+            column = safeOffset - lastBreak,
+        )
+    }
 }

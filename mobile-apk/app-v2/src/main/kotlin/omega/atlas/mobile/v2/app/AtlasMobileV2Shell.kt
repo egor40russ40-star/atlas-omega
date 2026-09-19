@@ -628,8 +628,10 @@ private fun CodeHome(runtime: AtlasTerminalRuntime) {
             onSave = runtime::saveEditor,
             canUndo = editor.canUndo,
             canRedo = editor.canRedo,
+            conflict = editor.conflict,
             onUndo = runtime::undoEditor,
             onRedo = runtime::redoEditor,
+            onReloadConflict = runtime::reloadEditorFromRemote,
             onTerminalAction = { action, _ ->
                 runtime.insertEditorIntoTerminal(action == CodeToTerminalAction.RUN)
             },

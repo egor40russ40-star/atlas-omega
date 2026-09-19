@@ -59,6 +59,7 @@ data class EditorUiState(
     val saving: Boolean = false,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
+    val conflict: Boolean = false,
 )
 
 class AtlasTerminalRuntime(
@@ -445,6 +446,7 @@ class AtlasTerminalRuntime(
                         loaded = true,
                         canUndo = false,
                         canRedo = false,
+                        conflict = false,
                     )
                     _filesMessage.value = "Файл открыт"
                     recordRecentFile(result.value.snapshot.path)
@@ -567,16 +569,34 @@ class AtlasTerminalRuntime(
                         saving = false,
                         canUndo = editorHistory.canUndo,
                         canRedo = editorHistory.canRedo,
+                        conflict = false,
                     )
                     _filesMessage.value = "Сохранено безопасно"
                     refreshFiles(_directoryPath.value)
                 }
                 is AtlasResult.Failure -> scope.launch {
-                    _editor.value = current.copy(saving = false)
+                    _editor.value = current.copy(
+                        saving = false,
+                        conflict = result.error.code == "file_changed_remotely" || current.conflict,
+                    )
                     _filesMessage.value = filesErrorMessage(result.error.code, result.error.technicalDetail)
                 }
             }
         }
+    }
+
+    fun reloadEditorFromRemote() {
+        val current = _editor.value
+        if (!current.loaded || current.path.isBlank()) return
+        openRemoteEntry(
+            RemoteFileEntry(
+                path = current.path,
+                name = current.path.substringAfterLast('/').ifBlank { current.path },
+                directory = false,
+                sizeBytes = 0L,
+                modifiedEpochMillis = 0L,
+            )
+        )
     }
 
     fun insertEditorIntoTerminal(execute: Boolean) {
