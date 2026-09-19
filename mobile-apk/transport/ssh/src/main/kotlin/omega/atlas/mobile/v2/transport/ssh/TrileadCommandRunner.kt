@@ -10,6 +10,7 @@ import omega.atlas.mobile.v2.core.model.ConnectionProfile
 import omega.atlas.mobile.v2.core.result.AtlasError
 import omega.atlas.mobile.v2.core.result.AtlasResult
 import omega.atlas.mobile.v2.core.result.ErrorDomain
+import omega.atlas.mobile.v2.core.result.TransportFailureClassifier
 import omega.atlas.mobile.v2.core.security.CredentialVault
 import omega.atlas.mobile.v2.core.security.HostKeyDecision
 import omega.atlas.mobile.v2.core.security.HostKeyObservation
@@ -132,12 +133,13 @@ class TrileadCommandRunner(
                     false,
                 )
             } else {
+                val classified = TransportFailureClassifier.classify(e)
                 failure(
-                    "ssh_exec_failed",
-                    ErrorDomain.SSH,
+                    classified.code,
+                    classified.domain,
                     "error_ssh_exec_failed",
-                    e.message,
-                    true,
+                    e.javaClass.simpleName + ": " + (e.message ?: "transport"),
+                    classified.retryable,
                 )
             }
         } finally {

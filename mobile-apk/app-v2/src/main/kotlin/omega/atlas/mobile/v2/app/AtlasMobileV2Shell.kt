@@ -900,29 +900,55 @@ private fun MonitoringHome(
         }
 
         items(probes, key = { it.label }) { probe ->
+            var showTechnical by remember(probe.label, probe.technicalDetail) { mutableStateOf(false) }
             Card(Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        healthGlyph(probe.status),
-                        modifier = Modifier.padding(end = 10.dp),
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Column(Modifier.weight(1f)) {
-                        Text(probe.label, style = MaterialTheme.typography.titleMedium)
+                Column(Modifier.padding(14.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            probe.detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            healthGlyph(probe.status),
+                            modifier = Modifier.padding(end = 10.dp),
+                            fontFamily = FontFamily.Monospace,
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(probe.label, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                probe.detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            probe.status.name,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
                         )
                     }
-                    Text(
-                        probe.status.name,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                    probe.nextAction?.let {
+                        Text(
+                            "Дальше: $it",
+                            modifier = Modifier.padding(top = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    probe.technicalDetail?.let { technical ->
+                        OutlinedButton(
+                            onClick = { showTechnical = !showTechnical },
+                            modifier = Modifier.padding(top = 6.dp),
+                        ) {
+                            Text(if (showTechnical) "Скрыть детали" else "Технические детали")
+                        }
+                        if (showTechnical) {
+                            Text(
+                                technical,
+                                modifier = Modifier.padding(top = 6.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }

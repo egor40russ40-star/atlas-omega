@@ -41,6 +41,8 @@ data class HealthProbeUi(
     val label: String,
     val status: LayerStatus,
     val detail: String,
+    val technicalDetail: String? = null,
+    val nextAction: String? = null,
 )
 
 data class EditorUiState(
@@ -532,10 +534,14 @@ class AtlasTerminalRuntime(
                 else -> LayerStatus.DEGRADED
             }
             HealthProbeUi(
-                label,
-                status,
-                result.error.technicalDetail?.lineSequence()?.firstOrNull()?.take(180)
-                    ?: result.error.code,
+                label = label,
+                status = status,
+                detail = diagnosticSummary(result.error.code),
+                technicalDetail = result.error.technicalDetail
+                    ?.lineSequence()
+                    ?.firstOrNull()
+                    ?.take(240),
+                nextAction = diagnosticNextAction(result.error.code),
             )
         }
     }
@@ -583,7 +589,7 @@ class AtlasTerminalRuntime(
                 }
                 is AtlasResult.Failure -> scope.launch {
                     _gatewayVersion.value = null
-                    _gatewayMessage.value = "Gateway: ${result.error.technicalDetail ?: result.error.code}"
+                    _gatewayMessage.value = "Gateway: " + diagnosticSummary(result.error.code)
                     _gatewayBusy.value = false
                 }
             }
@@ -760,9 +766,47 @@ class AtlasTerminalRuntime(
     private fun gitErrorMessage(detail: String?): String =
         "Git: " + (detail?.lineSequence()?.firstOrNull()?.take(220) ?: "операция не выполнена")
 
+    private fun diagnosticSummary(code: String): String = when (code) {
+        "network_dns_failed" -> "Имя сервера не разрешается DNS"
+        "network_route_unavailable" -> "Нет сетевого маршрута до сервера"
+        "network_timeout" -> "Сервер не ответил за отведённое время"
+        "network_connection_refused" -> "Сервер доступен, но порт отклонил соединение"
+        "network_remote_closed" -> "Удалённая сторона закрыла соединение до завершения протокола"
+        "network_tls_failed" -> "Защищённое TLS-соединение не прошло проверку"
+        "network_transport_failed" -> "Сетевой транспорт не установил соединение"
+        "ssh_exec_host_key_blocked",
+        "ssh_host_key_blocked" -> "Требуется проверка SSH host key"
+        "ssh_exec_auth_failed",
+        "ssh_auth_failed" -> "SSH-аутентификация отклонена"
+        "sftp_auth_failed" -> "SFTP-аутентификация отклонена"
+        else -> "Проверка завершилась ошибкой: $code"
+    }
+
+    private fun diagnosticNextAction(code: String): String? = when (code) {
+        "network_dns_failed" -> "Проверьте DNS/MagicDNS или выберите другой подтверждённый endpoint."
+        "network_route_unavailable" -> "Проверьте сеть/VPN/маршрут до выбранной машины."
+        "network_timeout" -> "Проверьте, включена ли машина и доступен ли выбранный маршрут."
+        "network_connection_refused" -> "Проверьте, слушает ли целевой сервис нужный порт."
+        "network_remote_closed" -> "TCP доступен; проверьте SSH/ACL/серверные ограничения на целевой машине."
+        "network_tls_failed" -> "Не обходите проверку TLS. Проверьте имя хоста и сертификат."
+        "ssh_exec_host_key_blocked",
+        "ssh_host_key_blocked" -> "Сверьте SHA-256 fingerprint перед подтверждением доверия."
+        "ssh_exec_auth_failed",
+        "ssh_auth_failed",
+        "sftp_auth_failed" -> "Проверьте credential именно этого профиля."
+        else -> null
+    }
+
     private fun userMessage(code: String, detail: String?): String = when (code) {
         "ssh_auth_failed" -> "Не удалось выполнить SSH-аутентификацию"
         "ssh_connect_failed" -> "Не удалось подключиться к SSH: ${detail ?: "сеть"}"
+        "network_dns_failed",
+        "network_route_unavailable",
+        "network_timeout",
+        "network_connection_refused",
+        "network_remote_closed",
+        "network_tls_failed",
+        "network_transport_failed" -> diagnosticSummary(code)
         "terminal_delivery_unknown" -> "Связь прервалась во время отправки. Команда не будет повторена автоматически."
         "tmux_attach_delivery_unknown" -> "Неясно, дошла ли команда восстановления tmux. Автоповтор отключён."
         else -> "Ошибка: ${detail ?: code}"

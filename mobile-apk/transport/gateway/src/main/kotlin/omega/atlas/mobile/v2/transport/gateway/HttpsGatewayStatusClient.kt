@@ -6,6 +6,7 @@ import org.json.JSONObject
 import omega.atlas.mobile.v2.core.result.AtlasError
 import omega.atlas.mobile.v2.core.result.AtlasResult
 import omega.atlas.mobile.v2.core.result.ErrorDomain
+import omega.atlas.mobile.v2.core.result.TransportFailureClassifier
 import omega.atlas.mobile.v2.feature.atlas.GatewayEndpointPolicy
 import omega.atlas.mobile.v2.feature.atlas.GatewayStatusPort
 import omega.atlas.mobile.v2.feature.atlas.GatewayVersion
@@ -75,11 +76,12 @@ class HttpsGatewayStatusClient(
             )
             AtlasResult.Success(result)
         } catch (e: Exception) {
+            val classified = TransportFailureClassifier.classify(e)
             failure(
-                "gateway_request_failed",
-                ErrorDomain.NETWORK,
+                classified.code,
+                classified.domain,
                 e.javaClass.simpleName + ": " + (e.message ?: "network"),
-                true,
+                classified.retryable,
             )
         } finally {
             connection?.disconnect()

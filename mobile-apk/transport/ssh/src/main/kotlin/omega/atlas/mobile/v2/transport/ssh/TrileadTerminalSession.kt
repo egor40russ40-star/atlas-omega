@@ -14,6 +14,7 @@ import omega.atlas.mobile.v2.core.model.TerminalSessionDescriptor
 import omega.atlas.mobile.v2.core.result.AtlasError
 import omega.atlas.mobile.v2.core.result.AtlasResult
 import omega.atlas.mobile.v2.core.result.ErrorDomain
+import omega.atlas.mobile.v2.core.result.TransportFailureClassifier
 import omega.atlas.mobile.v2.core.security.CredentialVault
 import omega.atlas.mobile.v2.core.security.HostKeyDecision
 import omega.atlas.mobile.v2.core.security.HostKeyObservation
@@ -121,12 +122,13 @@ class TrileadTerminalSession(
                     detail = "${observation.host}:${observation.port} ${observation.algorithm} ${observation.fingerprint}",
                 )
             } else {
+                val classified = TransportFailureClassifier.classify(e)
                 failure(
-                    code = "ssh_connect_failed",
-                    domain = ErrorDomain.SSH,
+                    code = classified.code,
+                    domain = classified.domain,
                     messageKey = "error_ssh_connect_failed",
-                    detail = e.message,
-                    retryable = true,
+                    detail = e.javaClass.simpleName + ": " + (e.message ?: "transport"),
+                    retryable = classified.retryable,
                 )
             }
         }
