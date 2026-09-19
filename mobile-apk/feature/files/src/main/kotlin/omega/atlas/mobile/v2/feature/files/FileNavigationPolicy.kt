@@ -22,9 +22,10 @@ object FileNavigationPolicy {
     ): List<String> {
         require(maxItems > 0)
         if (path.isBlank()) return normalizeRecent(current, maxItems)
+        val normalized = normalizeRecent(current, Int.MAX_VALUE)
         return buildList {
             add(path)
-            current.forEach { if (it != path) add(it) }
+            normalized.forEach { if (it != path) add(it) }
         }.take(maxItems)
     }
 
