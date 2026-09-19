@@ -113,7 +113,7 @@ class TrileadTerminalSession(
 
                     listener?.onStateChanged(TerminalLifecycleState.OPENING_PTY)
                     val sshSession = conn.openSession()
-                    session = sshSession
+                    this.session = sshSession
                     sshSession.requestPTY("xterm-256color", 80, 24, 0, 0, null)
                     stdin = sshSession.stdin
                     sshSession.startShell()

@@ -145,7 +145,7 @@ class TrileadCommandRunner(
                     }
 
                     val classified = TransportFailureClassifier.classify(e)
-                    val failure = failure<Unit>(
+                    val failure = failure<SshCommandResult>(
                         classified.code,
                         classified.domain,
                         "error_ssh_exec_failed",
