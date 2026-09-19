@@ -650,8 +650,11 @@ private fun FilesHome(
     val message by runtime.filesMessage
     val busy by runtime.filesBusy
     val profile by runtime.profile
+    val favorites by runtime.fileFavorites
+    val recent by runtime.recentFiles
     var showHidden by remember(profile.id) { mutableStateOf(false) }
     val visibleEntries = if (showHidden) entries else entries.filterNot { it.name.startsWith(".") }
+    val currentFavorite = path in favorites
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -673,6 +676,10 @@ private fun FilesHome(
                 maxLines = 2,
             )
             OutlinedButton(
+                onClick = { runtime.toggleFavoriteDirectory(path) },
+                enabled = !busy,
+            ) { Text(if (currentFavorite) "★" else "☆") }
+            OutlinedButton(
                 onClick = { showHidden = !showHidden },
                 enabled = !busy,
             ) { Text(if (showHidden) "Скрытые ✓" else "Скрытые") }
@@ -688,6 +695,26 @@ private fun FilesHome(
             enabled = !busy,
             onNavigate = runtime::refreshFiles,
         )
+
+        if (favorites.isNotEmpty()) {
+            FileShortcutRow(
+                title = "Избранное",
+                paths = favorites.toList().sorted(),
+                enabled = !busy,
+                onOpen = runtime::openFavoriteDirectory,
+            )
+        }
+
+        if (recent.isNotEmpty()) {
+            FileShortcutRow(
+                title = "Недавние",
+                paths = recent,
+                enabled = !busy,
+                onOpen = { runtime.openRecentFile(it, onFileOpened) },
+                trailingLabel = "Очистить",
+                onTrailing = runtime::clearRecentFiles,
+            )
+        }
 
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -763,6 +790,60 @@ private fun WorkspaceBreadcrumbs(
                 enabled = enabled,
                 label = { Text(part) },
             )
+        }
+    }
+}
+
+@Composable
+private fun FileShortcutRow(
+    title: String,
+    paths: List<String>,
+    enabled: Boolean,
+    onOpen: (String) -> Unit,
+    trailingLabel: String? = null,
+    onTrailing: (() -> Unit)? = null,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (trailingLabel != null && onTrailing != null) {
+                Text(
+                    trailingLabel,
+                    modifier = Modifier.clickable(enabled = enabled) { onTrailing() },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            paths.forEach { path ->
+                AssistChip(
+                    onClick = { onOpen(path) },
+                    enabled = enabled,
+                    label = {
+                        Text(
+                            path.substringAfterLast('/').ifBlank { "workspace" },
+                            maxLines = 1,
+                        )
+                    },
+                )
+            }
         }
     }
 }

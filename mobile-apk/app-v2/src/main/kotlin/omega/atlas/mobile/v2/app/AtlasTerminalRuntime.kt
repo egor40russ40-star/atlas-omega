@@ -25,6 +25,7 @@ import omega.atlas.mobile.v2.core.security.SshCredential
 import omega.atlas.mobile.v2.feature.atlas.GatewayEndpointPolicy
 import omega.atlas.mobile.v2.feature.atlas.GatewayVersion
 import omega.atlas.mobile.v2.feature.files.AtomicTextWriteRequest
+import omega.atlas.mobile.v2.feature.files.FileNavigationPolicy
 import omega.atlas.mobile.v2.feature.files.RemoteFileEntry
 import omega.atlas.mobile.v2.feature.files.RemoteTextDocument
 import omega.atlas.mobile.v2.feature.files.WorkspacePathPolicy
@@ -33,6 +34,7 @@ import omega.atlas.mobile.v2.feature.sessions.TerminalSessionCoordinator
 import omega.atlas.mobile.v2.feature.terminal.TerminalSessionPort
 import omega.atlas.mobile.v2.storage.local.AndroidKeystoreCredentialVault
 import omega.atlas.mobile.v2.storage.local.SharedPreferencesConnectionProfileStore
+import omega.atlas.mobile.v2.storage.local.SharedPreferencesFileNavigationStore
 import omega.atlas.mobile.v2.storage.local.SharedPreferencesHostKeyStore
 import omega.atlas.mobile.v2.transport.gateway.HttpsGatewayStatusClient
 import omega.atlas.mobile.v2.transport.sftp.TrileadRemoteFilesPort
@@ -64,6 +66,7 @@ class AtlasTerminalRuntime(
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val profileStore = SharedPreferencesConnectionProfileStore(appContext)
+    private val fileNavigationStore = SharedPreferencesFileNavigationStore(appContext)
     private val vault = AndroidKeystoreCredentialVault(appContext)
     private val hostKeyPolicy = PinnedHostKeyTrustPolicy(SharedPreferencesHostKeyStore(appContext))
     private val transport = TrileadTerminalSession(vault, hostKeyPolicy)
@@ -101,6 +104,12 @@ class AtlasTerminalRuntime(
 
     private val _filesBusy = mutableStateOf(false)
     val filesBusy: State<Boolean> = _filesBusy
+
+    private val _fileFavorites = mutableStateOf<Set<String>>(emptySet())
+    val fileFavorites: State<Set<String>> = _fileFavorites
+
+    private val _recentFiles = mutableStateOf<List<String>>(emptyList())
+    val recentFiles: State<List<String>> = _recentFiles
 
     private val _editor = mutableStateOf(EditorUiState())
     val editor: State<EditorUiState> = _editor
@@ -142,6 +151,7 @@ class AtlasTerminalRuntime(
 
     init {
         transport.setListener(this)
+        reloadFileNavigation()
     }
 
     fun connect() {
@@ -429,6 +439,7 @@ class AtlasTerminalRuntime(
                         loaded = true,
                     )
                     _filesMessage.value = "Файл открыт"
+                    recordRecentFile(result.value.snapshot.path)
                     onFileReady()
                 }
                 is AtlasResult.Failure -> scope.launch {
@@ -437,6 +448,49 @@ class AtlasTerminalRuntime(
                 }
             }
         }
+    }
+
+    fun toggleFavoriteDirectory(path: String = _directoryPath.value) {
+        val safe = runCatching {
+            WorkspacePathPolicy.resolve(currentWorkspaceRoot(), path)
+        }.getOrNull() ?: return
+        val next = FileNavigationPolicy.toggleFavorite(
+            favorites = _fileFavorites.value,
+            path = safe,
+            maxFavorites = MAX_FILE_FAVORITES,
+        )
+        _fileFavorites.value = next
+        fileNavigationStore.saveFavorites(_profile.value.id, next)
+    }
+
+    fun openFavoriteDirectory(path: String) {
+        if (WorkspacePathPolicy.isWithin(currentWorkspaceRoot(), path)) {
+            refreshFiles(path)
+        }
+    }
+
+    fun openRecentFile(path: String, onFileReady: () -> Unit = {}) {
+        if (!WorkspacePathPolicy.isWithin(currentWorkspaceRoot(), path)) {
+            _recentFiles.value = _recentFiles.value.filterNot { it == path }
+            fileNavigationStore.saveRecent(_profile.value.id, _recentFiles.value)
+            _filesMessage.value = "Недавний файл больше не принадлежит workspace"
+            return
+        }
+        openRemoteEntry(
+            RemoteFileEntry(
+                path = path,
+                name = path.substringAfterLast('/').ifBlank { path },
+                directory = false,
+                sizeBytes = 0L,
+                modifiedEpochMillis = 0L,
+            ),
+            onFileReady,
+        )
+    }
+
+    fun clearRecentFiles() {
+        _recentFiles.value = emptyList()
+        fileNavigationStore.saveRecent(_profile.value.id, emptyList())
     }
 
     fun updateEditorText(value: String) {
@@ -752,6 +806,30 @@ class AtlasTerminalRuntime(
         _gatewayMessage.value = "Нажмите «Проверить Gateway»"
         _pendingTrust.value = null
         _state.value = TerminalLifecycleState.DISCONNECTED
+        reloadFileNavigation()
+    }
+
+    private fun reloadFileNavigation() {
+        val profile = _profile.value
+        val root = profile.workspaceRoot
+        val favorites = fileNavigationStore.loadFavorites(profile.id)
+            .filterTo(linkedSetOf()) { WorkspacePathPolicy.isWithin(root, it) }
+        val recent = fileNavigationStore.loadRecent(profile.id)
+            .filter { WorkspacePathPolicy.isWithin(root, it) }
+            .let { FileNavigationPolicy.normalizeRecent(it, MAX_RECENT_FILES) }
+        _fileFavorites.value = favorites
+        _recentFiles.value = recent
+    }
+
+    private fun recordRecentFile(path: String) {
+        if (!WorkspacePathPolicy.isWithin(currentWorkspaceRoot(), path)) return
+        val next = FileNavigationPolicy.pushRecent(
+            current = _recentFiles.value,
+            path = path,
+            maxItems = MAX_RECENT_FILES,
+        )
+        _recentFiles.value = next
+        fileNavigationStore.saveRecent(_profile.value.id, next)
     }
 
     private fun refreshCredentialStatus(profileId: String) {
@@ -868,6 +946,8 @@ class AtlasTerminalRuntime(
     )
 
     private companion object {
+        const val MAX_FILE_FAVORITES = 12
+        const val MAX_RECENT_FILES = 12
         const val DEFAULT_WORKSPACE_ROOT = "/home/test4/ATLAS_EXECUTION_NODE"
         const val DEFAULT_GATEWAY = "https://tinvest-robot.tailf87948.ts.net"
     }
