@@ -42,106 +42,127 @@ class TrileadCommandRunner(
         }
 
         var connection: Connection? = null
-        var rejected: HostKeyObservation? = null
-        return try {
-            val conn = Connection(profile.host, profile.port)
-            connection = conn
-            val verifier = ServerHostKeyVerifier { host, port, algorithm, key ->
-                val observation = HostKeyObservation(
-                    host = host,
-                    port = port,
-                    algorithm = algorithm,
-                    fingerprint = SshTransportUtils.fingerprint(key),
-                )
-                when (trustPolicy.evaluate(observation)) {
-                    HostKeyDecision.TRUSTED -> true
-                    HostKeyDecision.UNSEEN,
-                    HostKeyDecision.CHANGED -> {
-                        rejected = observation
-                        false
+        var lastTransportFailure: AtlasResult.Failure? = null
+        try {
+            val endpoints = profile.sshEndpoints()
+            for ((index, endpoint) in endpoints.withIndex()) {
+                var rejected: HostKeyObservation? = null
+                try {
+                    val conn = Connection(endpoint.host, endpoint.port)
+                    connection = conn
+                    val verifier = ServerHostKeyVerifier { host, port, algorithm, key ->
+                        val observation = HostKeyObservation(
+                            host = host,
+                            port = port,
+                            algorithm = algorithm,
+                            fingerprint = SshTransportUtils.fingerprint(key),
+                        )
+                        when (trustPolicy.evaluate(observation)) {
+                            HostKeyDecision.TRUSTED -> true
+                            HostKeyDecision.UNSEEN,
+                            HostKeyDecision.CHANGED -> {
+                                rejected = observation
+                                false
+                            }
+                        }
                     }
-                }
-            }
-            conn.connect(verifier, 10_000, 15_000)
+                    conn.connect(verifier, 10_000, 15_000)
 
-            val authenticated = when (credential) {
-                SshCredential.None -> conn.authenticateWithNone(profile.username)
-                is SshCredential.Password -> conn.authenticateWithPassword(
-                    profile.username,
-                    credential.value.concatToString(),
-                )
-                is SshCredential.PrivateKey -> conn.authenticateWithPublicKey(
-                    profile.username,
-                    credential.pem,
-                    credential.passphrase?.concatToString(),
-                )
-            }
-            if (!authenticated) {
-                return failure("ssh_exec_auth_failed", ErrorDomain.AUTH, "error_ssh_exec_auth_failed")
-            }
+                    val authenticated = when (credential) {
+                        SshCredential.None -> conn.authenticateWithNone(profile.username)
+                        is SshCredential.Password -> conn.authenticateWithPassword(
+                            profile.username,
+                            credential.value.concatToString(),
+                        )
+                        is SshCredential.PrivateKey -> conn.authenticateWithPublicKey(
+                            profile.username,
+                            credential.pem,
+                            credential.passphrase?.concatToString(),
+                        )
+                    }
+                    if (!authenticated) {
+                        return failure(
+                            "ssh_exec_auth_failed",
+                            ErrorDomain.AUTH,
+                            "error_ssh_exec_auth_failed",
+                        )
+                    }
 
-            val session = conn.openSession()
-            try {
-                session.execCommand(command)
-                val stdout = BoundedCollector(maxOutputBytes)
-                val stderr = BoundedCollector(maxOutputBytes)
-                val outThread = thread(name = "atlas-ssh-exec-out", isDaemon = true) {
-                    stdout.readFrom(session.stdout)
-                }
-                val errThread = thread(name = "atlas-ssh-exec-err", isDaemon = true) {
-                    stderr.readFrom(session.stderr)
-                }
+                    val sshSession = conn.openSession()
+                    try {
+                        sshSession.execCommand(command)
+                        val stdout = BoundedCollector(maxOutputBytes)
+                        val stderr = BoundedCollector(maxOutputBytes)
+                        val outThread = thread(name = "atlas-ssh-exec-out", isDaemon = true) {
+                            stdout.readFrom(sshSession.stdout)
+                        }
+                        val errThread = thread(name = "atlas-ssh-exec-err", isDaemon = true) {
+                            stderr.readFrom(sshSession.stderr)
+                        }
 
-                val conditions = session.waitForCondition(
-                    ChannelCondition.EXIT_STATUS or ChannelCondition.EOF or ChannelCondition.CLOSED,
-                    timeoutMillis,
-                )
-                if ((conditions and ChannelCondition.TIMEOUT) != 0) {
-                    session.close()
-                    outThread.join(2_000)
-                    errThread.join(2_000)
-                    return failure(
-                        "ssh_exec_timeout",
-                        ErrorDomain.SSH,
-                        "error_ssh_exec_timeout",
-                        retryable = true,
+                        val conditions = sshSession.waitForCondition(
+                            ChannelCondition.EXIT_STATUS or ChannelCondition.EOF or ChannelCondition.CLOSED,
+                            timeoutMillis,
+                        )
+                        if ((conditions and ChannelCondition.TIMEOUT) != 0) {
+                            sshSession.close()
+                            outThread.join(2_000)
+                            errThread.join(2_000)
+                            return failure(
+                                "ssh_exec_timeout",
+                                ErrorDomain.SSH,
+                                "error_ssh_exec_timeout",
+                                retryable = true,
+                            )
+                        }
+
+                        outThread.join(2_000)
+                        errThread.join(2_000)
+                        val exit = sshSession.exitStatus ?: -1
+                        return AtlasResult.Success(
+                            SshCommandResult(
+                                stdout = stdout.text(),
+                                stderr = stderr.text(),
+                                exitCode = exit,
+                                outputTruncated = stdout.truncated || stderr.truncated,
+                            )
+                        )
+                    } finally {
+                        sshSession.close()
+                    }
+                } catch (e: Exception) {
+                    runCatching { connection?.close() }
+                    connection = null
+                    val observation = rejected
+                    if (observation != null) {
+                        return failure(
+                            "ssh_exec_host_key_blocked",
+                            ErrorDomain.TRUST,
+                            "error_ssh_exec_host_key_blocked",
+                            "${observation.host}:${observation.port} ${observation.fingerprint}",
+                            false,
+                        )
+                    }
+
+                    val classified = TransportFailureClassifier.classify(e)
+                    val failure = failure<Unit>(
+                        classified.code,
+                        classified.domain,
+                        "error_ssh_exec_failed",
+                        "${endpoint.label} ${endpoint.host}:${endpoint.port} • " +
+                            e.javaClass.simpleName + ": " + (e.message ?: "transport"),
+                        classified.retryable,
                     )
+                    if (failure is AtlasResult.Failure) lastTransportFailure = failure
+                    val mayFallback =
+                        classified.domain == ErrorDomain.NETWORK &&
+                            classified.retryable &&
+                            index < endpoints.lastIndex
+                    if (!mayFallback) return failure
                 }
-
-                outThread.join(2_000)
-                errThread.join(2_000)
-                val exit = session.exitStatus ?: -1
-                AtlasResult.Success(
-                    SshCommandResult(
-                        stdout = stdout.text(),
-                        stderr = stderr.text(),
-                        exitCode = exit,
-                        outputTruncated = stdout.truncated || stderr.truncated,
-                    )
-                )
-            } finally {
-                session.close()
             }
-        } catch (e: Exception) {
-            val observation = rejected
-            if (observation != null) {
-                failure(
-                    "ssh_exec_host_key_blocked",
-                    ErrorDomain.TRUST,
-                    "error_ssh_exec_host_key_blocked",
-                    "${observation.host}:${observation.port} ${observation.fingerprint}",
-                    false,
-                )
-            } else {
-                val classified = TransportFailureClassifier.classify(e)
-                failure(
-                    classified.code,
-                    classified.domain,
-                    "error_ssh_exec_failed",
-                    e.javaClass.simpleName + ": " + (e.message ?: "transport"),
-                    classified.retryable,
-                )
-            }
+            return lastTransportFailure
+                ?: failure("network_transport_failed", ErrorDomain.NETWORK, "error_ssh_exec_failed")
         } finally {
             runCatching { connection?.close() }
             wipeCredential(credential)

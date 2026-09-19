@@ -2,7 +2,11 @@ package omega.atlas.mobile.v2.storage.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
 import omega.atlas.mobile.v2.core.model.ConnectionProfile
+import omega.atlas.mobile.v2.core.model.SshEndpoint
+import omega.atlas.mobile.v2.core.model.SshEndpointKind
 import omega.atlas.mobile.v2.core.model.TrustState
 
 /**
@@ -112,6 +116,9 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
                 prefs.getString(profileKey(id, FIELD_TRUST), TrustState.UNENROLLED.name)
             ),
             autoConnect = prefs.getBoolean(profileKey(id, FIELD_AUTO_CONNECT), false),
+            fallbackSshEndpoints = decodeEndpoints(
+                prefs.getString(profileKey(id, FIELD_FALLBACK_ENDPOINTS), null)
+            ),
         )
     }
 
@@ -135,6 +142,9 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
                 prefs.getString(LEGACY_TRUST, TrustState.UNENROLLED.name)
             ),
             autoConnect = prefs.getBoolean(LEGACY_AUTO_CONNECT, false),
+            fallbackSshEndpoints = decodeEndpoints(
+                prefs.getString(LEGACY_FALLBACK_ENDPOINTS, null)
+            ),
         )
     }
 
@@ -149,6 +159,10 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
         putString(profileKey(profile.id, FIELD_GATEWAY), profile.gatewayBaseUrl)
         putString(profileKey(profile.id, FIELD_TRUST), profile.trustState.name)
         putBoolean(profileKey(profile.id, FIELD_AUTO_CONNECT), profile.autoConnect)
+        putString(
+            profileKey(profile.id, FIELD_FALLBACK_ENDPOINTS),
+            encodeEndpoints(profile.fallbackSshEndpoints),
+        )
     }
 
     private fun SharedPreferences.Editor.writeLegacyMirror(
@@ -163,6 +177,50 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
         putString(LEGACY_GATEWAY, profile.gatewayBaseUrl)
         putString(LEGACY_TRUST, profile.trustState.name)
         putBoolean(LEGACY_AUTO_CONNECT, profile.autoConnect)
+        putString(LEGACY_FALLBACK_ENDPOINTS, encodeEndpoints(profile.fallbackSshEndpoints))
+    }
+
+    private fun encodeEndpoints(endpoints: List<SshEndpoint>): String {
+        val array = JSONArray()
+        endpoints.forEach { endpoint ->
+            array.put(
+                JSONObject()
+                    .put("id", endpoint.id)
+                    .put("label", endpoint.label)
+                    .put("host", endpoint.host.trim())
+                    .put("port", endpoint.port)
+                    .put("kind", endpoint.kind.name)
+            )
+        }
+        return array.toString()
+    }
+
+    private fun decodeEndpoints(raw: String?): List<SshEndpoint> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    val host = item.optString("host", "").trim()
+                    val port = item.optInt("port", 22)
+                    if (host.isBlank() || port !in 1..65535) continue
+                    add(
+                        SshEndpoint(
+                            id = item.optString("id", "fallback-$index"),
+                            label = item.optString("label", "Резервный"),
+                            host = host,
+                            port = port,
+                            kind = runCatching {
+                                SshEndpointKind.valueOf(
+                                    item.optString("kind", SshEndpointKind.FALLBACK.name)
+                                )
+                            }.getOrDefault(SshEndpointKind.FALLBACK),
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     private fun parseTrust(raw: String?): TrustState = runCatching {
@@ -186,6 +244,7 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
         const val FIELD_GATEWAY = "gateway"
         const val FIELD_TRUST = "trust"
         const val FIELD_AUTO_CONNECT = "auto_connect"
+        const val FIELD_FALLBACK_ENDPOINTS = "fallback_ssh_endpoints"
 
         const val LEGACY_ID = "id"
         const val LEGACY_TITLE = "title"
@@ -196,6 +255,7 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
         const val LEGACY_GATEWAY = "gateway"
         const val LEGACY_TRUST = "trust"
         const val LEGACY_AUTO_CONNECT = "auto_connect"
+        const val LEGACY_FALLBACK_ENDPOINTS = "fallback_ssh_endpoints"
 
         const val DEFAULT_ID = "nucbox-primary"
         const val DEFAULT_WORKSPACE_ROOT = "/home/test4/ATLAS_EXECUTION_NODE"

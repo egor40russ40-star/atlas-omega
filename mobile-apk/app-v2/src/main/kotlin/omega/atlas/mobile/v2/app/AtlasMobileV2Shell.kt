@@ -393,6 +393,12 @@ private fun ConnectionSetup(
     var host by remember(current.id) { mutableStateOf(current.host) }
     var port by remember(current.id) { mutableStateOf(current.port.toString()) }
     var username by remember(current.id) { mutableStateOf(current.username) }
+    var fallbackHost by remember(current.id) {
+        mutableStateOf(current.fallbackSshEndpoints.firstOrNull()?.host.orEmpty())
+    }
+    var fallbackPort by remember(current.id) {
+        mutableStateOf(current.fallbackSshEndpoints.firstOrNull()?.port?.toString() ?: "22")
+    }
     var workspaceRoot by remember(current.id) { mutableStateOf(current.workspaceRoot) }
     var gateway by remember(current.id) {
         mutableStateOf(current.gatewayBaseUrl ?: "https://tinvest-robot.tailf87948.ts.net")
@@ -463,6 +469,32 @@ private fun ConnectionSetup(
             }
         }
         item {
+            Text("Резервный SSH-маршрут", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Используется только при сетевой недоступности основного адреса. Новый host key всё равно требует проверки.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = fallbackHost,
+                    onValueChange = { fallbackHost = it },
+                    label = { Text("Резервный хост") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = fallbackPort,
+                    onValueChange = { fallbackPort = it.filter(Char::isDigit).take(5) },
+                    label = { Text("Порт") },
+                    singleLine = true,
+                    modifier = Modifier.weight(0.45f),
+                )
+            }
+        }
+        item {
             OutlinedTextField(
                 value = workspaceRoot,
                 onValueChange = { workspaceRoot = it },
@@ -486,6 +518,8 @@ private fun ConnectionSetup(
                         host = host,
                         port = port.toIntOrNull() ?: 22,
                         username = username,
+                        fallbackHost = fallbackHost,
+                        fallbackPort = fallbackPort.toIntOrNull() ?: 22,
                         workspaceRoot = workspaceRoot,
                         gatewayBaseUrl = gateway,
                         autoConnect = autoConnect,

@@ -9,6 +9,7 @@ import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import omega.atlas.mobile.v2.core.model.ConnectionProfile
+import omega.atlas.mobile.v2.core.model.SshEndpoint
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
 import omega.atlas.mobile.v2.core.model.TerminalSessionDescriptor
 import omega.atlas.mobile.v2.core.result.AtlasError
@@ -34,6 +35,7 @@ class TrileadTerminalSession(
     @Volatile private var listener: TerminalSessionPort.Listener? = null
     @Volatile private var activeDescriptor: TerminalSessionDescriptor? = null
     @Volatile private var rejectedObservation: HostKeyObservation? = null
+    @Volatile private var connectedEndpoint: SshEndpoint? = null
     private val closing = AtomicBoolean(false)
 
     override fun setListener(listener: TerminalSessionPort.Listener?) {
@@ -41,6 +43,8 @@ class TrileadTerminalSession(
     }
 
     fun pendingHostKeyObservation(): HostKeyObservation? = rejectedObservation
+
+    fun activeEndpoint(): SshEndpoint? = connectedEndpoint
 
     fun clearPendingHostKeyObservation() {
         rejectedObservation = null
@@ -61,76 +65,97 @@ class TrileadTerminalSession(
             is AtlasResult.Failure -> return loaded
         }
 
-        return try {
-            val conn = Connection(profile.host, profile.port)
-            connection = conn
-            val verifier = ServerHostKeyVerifier { host, port, algorithm, key ->
-                val observation = HostKeyObservation(
-                    host = host,
-                    port = port,
-                    algorithm = algorithm,
-                    fingerprint = SshTransportUtils.fingerprint(key),
-                )
-                when (trustPolicy.evaluate(observation)) {
-                    HostKeyDecision.TRUSTED -> true
-                    HostKeyDecision.UNSEEN,
-                    HostKeyDecision.CHANGED -> {
-                        rejectedObservation = observation
-                        false
+        var lastTransportFailure: AtlasResult.Failure? = null
+        try {
+            val endpoints = profile.sshEndpoints()
+            for ((index, endpoint) in endpoints.withIndex()) {
+                rejectedObservation = null
+                connectedEndpoint = null
+                try {
+                    val conn = Connection(endpoint.host, endpoint.port)
+                    connection = conn
+                    val verifier = ServerHostKeyVerifier { host, port, algorithm, key ->
+                        val observation = HostKeyObservation(
+                            host = host,
+                            port = port,
+                            algorithm = algorithm,
+                            fingerprint = SshTransportUtils.fingerprint(key),
+                        )
+                        when (trustPolicy.evaluate(observation)) {
+                            HostKeyDecision.TRUSTED -> true
+                            HostKeyDecision.UNSEEN,
+                            HostKeyDecision.CHANGED -> {
+                                rejectedObservation = observation
+                                false
+                            }
+                        }
                     }
+
+                    conn.connect(verifier, 10_000, 15_000)
+                    listener?.onStateChanged(TerminalLifecycleState.AUTHENTICATING)
+
+                    val authenticated = when (credential) {
+                        SshCredential.None -> conn.authenticateWithNone(profile.username)
+                        is SshCredential.Password -> conn.authenticateWithPassword(
+                            profile.username,
+                            credential.value.concatToString(),
+                        )
+                        is SshCredential.PrivateKey -> conn.authenticateWithPublicKey(
+                            profile.username,
+                            credential.pem,
+                            credential.passphrase?.concatToString(),
+                        )
+                    }
+                    if (!authenticated) {
+                        closeTransport()
+                        return failure("ssh_auth_failed", ErrorDomain.AUTH, "error_ssh_auth_failed")
+                    }
+
+                    listener?.onStateChanged(TerminalLifecycleState.OPENING_PTY)
+                    val sshSession = conn.openSession()
+                    session = sshSession
+                    sshSession.requestPTY("xterm-256color", 80, 24, 0, 0, null)
+                    stdin = sshSession.stdin
+                    sshSession.startShell()
+                    connectedEndpoint = endpoint
+                    startReader(StreamGobbler(sshSession.stdout), "stdout")
+                    startReader(StreamGobbler(sshSession.stderr), "stderr")
+                    listener?.onStateChanged(TerminalLifecycleState.READY)
+                    return AtlasResult.Success(Unit)
+                } catch (e: Exception) {
+                    val observation = rejectedObservation
+                    closeTransport()
+                    if (observation != null) {
+                        return failure(
+                            code = "ssh_host_key_blocked",
+                            domain = ErrorDomain.TRUST,
+                            messageKey = "error_ssh_host_key_blocked",
+                            detail = "${observation.host}:${observation.port} ${observation.algorithm} ${observation.fingerprint}",
+                        )
+                    }
+
+                    val classified = TransportFailureClassifier.classify(e)
+                    val failure = failure<Unit>(
+                        code = classified.code,
+                        domain = classified.domain,
+                        messageKey = "error_ssh_connect_failed",
+                        detail = "${endpoint.label} ${endpoint.host}:${endpoint.port} • " +
+                            e.javaClass.simpleName + ": " + (e.message ?: "transport"),
+                        retryable = classified.retryable,
+                    )
+                    if (failure is AtlasResult.Failure) lastTransportFailure = failure
+
+                    val mayFallback =
+                        classified.domain == ErrorDomain.NETWORK &&
+                            classified.retryable &&
+                            index < endpoints.lastIndex
+                    if (!mayFallback) return failure
                 }
             }
-
-            conn.connect(verifier, 10_000, 15_000)
-            listener?.onStateChanged(TerminalLifecycleState.AUTHENTICATING)
-
-            val authenticated = when (credential) {
-                SshCredential.None -> conn.authenticateWithNone(profile.username)
-                is SshCredential.Password -> conn.authenticateWithPassword(
-                    profile.username,
-                    credential.value.concatToString(),
-                )
-                is SshCredential.PrivateKey -> conn.authenticateWithPublicKey(
-                    profile.username,
-                    credential.pem,
-                    credential.passphrase?.concatToString(),
-                )
-            }
-            if (!authenticated) {
-                closeTransport()
-                return failure("ssh_auth_failed", ErrorDomain.AUTH, "error_ssh_auth_failed")
-            }
-
-            listener?.onStateChanged(TerminalLifecycleState.OPENING_PTY)
-            val sshSession = conn.openSession()
-            this.session = sshSession
-            sshSession.requestPTY("xterm-256color", 80, 24, 0, 0, null)
-            stdin = sshSession.stdin
-            sshSession.startShell()
-            startReader(StreamGobbler(sshSession.stdout), "stdout")
-            startReader(StreamGobbler(sshSession.stderr), "stderr")
-            listener?.onStateChanged(TerminalLifecycleState.READY)
-            AtlasResult.Success(Unit)
-        } catch (e: Exception) {
-            val observation = rejectedObservation
-            closeTransport()
-            if (observation != null) {
-                failure(
-                    code = "ssh_host_key_blocked",
-                    domain = ErrorDomain.TRUST,
-                    messageKey = "error_ssh_host_key_blocked",
-                    detail = "${observation.host}:${observation.port} ${observation.algorithm} ${observation.fingerprint}",
-                )
-            } else {
-                val classified = TransportFailureClassifier.classify(e)
-                failure(
-                    code = classified.code,
-                    domain = classified.domain,
-                    messageKey = "error_ssh_connect_failed",
-                    detail = e.javaClass.simpleName + ": " + (e.message ?: "transport"),
-                    retryable = classified.retryable,
-                )
-            }
+            return lastTransportFailure
+                ?: failure("network_transport_failed", ErrorDomain.NETWORK, "error_ssh_connect_failed")
+        } finally {
+            wipeCredential(credential)
         }
     }
 
@@ -212,6 +237,18 @@ class TrileadTerminalSession(
         stdin = null
         session = null
         connection = null
+        connectedEndpoint = null
+    }
+
+    private fun wipeCredential(credential: SshCredential) {
+        when (credential) {
+            SshCredential.None -> Unit
+            is SshCredential.Password -> credential.value.fill('\u0000')
+            is SshCredential.PrivateKey -> {
+                credential.pem.fill('\u0000')
+                credential.passphrase?.fill('\u0000')
+            }
+        }
     }
 
     private fun <T> failure(

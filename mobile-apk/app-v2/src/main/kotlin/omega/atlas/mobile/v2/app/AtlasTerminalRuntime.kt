@@ -12,6 +12,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import omega.atlas.mobile.v2.core.model.ConnectionProfile
 import omega.atlas.mobile.v2.core.model.LayerStatus
+import omega.atlas.mobile.v2.core.model.SshEndpoint
+import omega.atlas.mobile.v2.core.model.SshEndpointKind
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
 import omega.atlas.mobile.v2.core.model.TerminalSessionDescriptor
 import omega.atlas.mobile.v2.core.model.TrustState
@@ -154,7 +156,14 @@ class AtlasTerminalRuntime(
                 title = "ATLAS",
             )
             when (val result = coordinator.open(current, descriptor)) {
-                is AtlasResult.Success -> postMessage("Терминал подключён • tmux: atlas-mobile")
+                is AtlasResult.Success -> {
+                    val endpoint = transport.activeEndpoint()
+                    postMessage(
+                        "Терминал подключён • " +
+                            (endpoint?.let { "${it.label}: ${it.host}:${it.port}" } ?: current.host) +
+                            " • tmux: atlas-mobile"
+                    )
+                }
                 is AtlasResult.Failure -> {
                     val pending = transport.pendingHostKeyObservation()
                     if (pending != null) {
@@ -257,6 +266,8 @@ class AtlasTerminalRuntime(
         host: String,
         port: Int,
         username: String,
+        fallbackHost: String,
+        fallbackPort: Int,
         workspaceRoot: String,
         gatewayBaseUrl: String,
         autoConnect: Boolean,
@@ -264,14 +275,26 @@ class AtlasTerminalRuntime(
         require(host.isNotBlank())
         require(username.isNotBlank())
         require(port in 1..65535)
+        require(fallbackPort in 1..65535)
         val normalizedWorkspaceRoot = normalizeWorkspaceRoot(workspaceRoot)
         val normalizedGateway = GatewayEndpointPolicy.normalizeHttpsBaseUrl(gatewayBaseUrl)
 
         val previous = _profile.value
         val endpointChanged = previous.host != host.trim() || previous.port != port
-        if (endpointChanged && previous.host.isNotBlank()) {
-            hostKeyPolicy.clear(previous.host, previous.port)
-        }
+        val fallbackEndpoints = fallbackHost.trim()
+            .takeIf { it.isNotBlank() }
+            ?.let {
+                listOf(
+                    SshEndpoint(
+                        id = "fallback-1",
+                        label = "Резервный",
+                        host = it,
+                        port = fallbackPort,
+                        kind = SshEndpointKind.FALLBACK,
+                    )
+                )
+            }
+            ?: emptyList()
 
         val updated = previous.copy(
             title = title.trim().ifBlank { "NucBox" },
@@ -282,6 +305,7 @@ class AtlasTerminalRuntime(
             gatewayBaseUrl = normalizedGateway,
             trustState = if (endpointChanged) TrustState.UNENROLLED else previous.trustState,
             autoConnect = autoConnect,
+            fallbackSshEndpoints = fallbackEndpoints,
         )
         _profile.value = updated
         profileStore.save(updated)
