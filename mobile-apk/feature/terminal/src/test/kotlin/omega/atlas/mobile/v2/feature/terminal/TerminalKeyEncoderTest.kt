@@ -13,6 +13,11 @@ class TerminalKeyEncoderTest {
     }
 
     @Test
+    fun enterUsesCarriageReturn() {
+        assertArrayEquals(byteArrayOf(0x0D), TerminalKeyEncoder.encode(TerminalKey.ENTER))
+    }
+
+    @Test
     fun controlCUsesEtX() {
         assertArrayEquals(byteArrayOf(0x03), TerminalKeyEncoder.ctrl('C'))
     }

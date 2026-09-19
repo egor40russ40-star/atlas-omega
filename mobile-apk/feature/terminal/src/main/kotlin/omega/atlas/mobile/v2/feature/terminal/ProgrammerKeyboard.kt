@@ -22,6 +22,7 @@ sealed interface KeyboardAction {
 private val PrimaryActions = listOf(
     "ESC" to KeyboardAction.Special(TerminalKey.ESC),
     "TAB" to KeyboardAction.Special(TerminalKey.TAB),
+    "ENTER" to KeyboardAction.Special(TerminalKey.ENTER),
     "CTRL+C" to KeyboardAction.Control('C'),
     "CTRL+D" to KeyboardAction.Control('D'),
     "CTRL+Z" to KeyboardAction.Control('Z'),

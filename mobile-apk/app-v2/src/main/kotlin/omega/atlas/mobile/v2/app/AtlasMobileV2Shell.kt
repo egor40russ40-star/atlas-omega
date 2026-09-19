@@ -1,6 +1,8 @@
 package omega.atlas.mobile.v2.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,7 +36,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +49,8 @@ import omega.atlas.mobile.v2.feature.editor.CodeEditorScreen
 import omega.atlas.mobile.v2.feature.editor.CodeToTerminalAction
 import omega.atlas.mobile.v2.feature.git.GitScreen
 import omega.atlas.mobile.v2.feature.terminal.KeyboardAction
+import omega.atlas.mobile.v2.feature.terminal.PasteSafety
+import omega.atlas.mobile.v2.feature.terminal.TerminalKey
 import omega.atlas.mobile.v2.feature.terminal.TerminalKeyEncoder
 import omega.atlas.mobile.v2.feature.terminal.TerminalWorkspaceChrome
 import org.connectbot.terminal.Terminal
@@ -205,6 +211,11 @@ private fun TerminalHome(
             modifier = Modifier.weight(1f),
         )
 
+        TerminalInputBar(
+            ready = state == TerminalLifecycleState.READY,
+            onSend = runtime::send,
+        )
+
         Row(
             Modifier
                 .fillMaxWidth()
@@ -224,6 +235,95 @@ private fun TerminalHome(
                 Button(onClick = runtime::connect) { Text("Подключить") }
             }
         }
+    }
+}
+
+@Composable
+private fun TerminalInputBar(
+    ready: Boolean,
+    onSend: (ByteArray) -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    var draft by remember { mutableStateOf("") }
+    var confirmMultiline by remember { mutableStateOf(false) }
+
+    fun sendDraftNow() {
+        if (draft.isEmpty()) return
+        val payload = draft.encodeToByteArray() + TerminalKeyEncoder.encode(TerminalKey.ENTER)
+        onSend(payload)
+        draft = ""
+        confirmMultiline = false
+    }
+
+    fun requestSend() {
+        if (draft.isEmpty()) return
+        if (PasteSafety.requiresConfirmation(draft)) {
+            confirmMultiline = true
+        } else {
+            sendDraftNow()
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = { Text("Команда / текст") },
+            enabled = ready,
+            maxLines = 2,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { requestSend() }),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    val text = clipboard.getText()?.text.orEmpty()
+                    if (text.isNotEmpty()) draft = text
+                },
+                enabled = ready,
+                modifier = Modifier.weight(1f),
+            ) { Text("Вставить") }
+
+            OutlinedButton(
+                onClick = { onSend(TerminalKeyEncoder.encode(TerminalKey.ENTER)) },
+                enabled = ready,
+                modifier = Modifier.weight(1f),
+            ) { Text("Enter") }
+
+            Button(
+                onClick = { requestSend() },
+                enabled = ready && draft.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+            ) { Text("Отправить") }
+        }
+    }
+
+    if (confirmMultiline) {
+        val lines = draft.lineSequence().count()
+        AlertDialog(
+            onDismissRequest = { confirmMultiline = false },
+            title = { Text("Многострочная команда") },
+            text = {
+                Text(
+                    "В буфере $lines строк. «Отправить» передаст их в терминал и затем Enter. Проверьте текст перед выполнением."
+                )
+            },
+            confirmButton = {
+                Button(onClick = { sendDraftNow() }) { Text("Отправить") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirmMultiline = false }) { Text("Отмена") }
+            },
+        )
     }
 }
 
