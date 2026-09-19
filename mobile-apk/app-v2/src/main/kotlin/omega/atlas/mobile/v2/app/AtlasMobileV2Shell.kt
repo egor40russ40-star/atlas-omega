@@ -51,6 +51,7 @@ import omega.atlas.mobile.v2.feature.editor.CodeToTerminalAction
 import omega.atlas.mobile.v2.feature.git.GitScreen
 import omega.atlas.mobile.v2.feature.terminal.KeyboardAction
 import omega.atlas.mobile.v2.feature.terminal.PasteSafety
+import omega.atlas.mobile.v2.feature.terminal.TerminalInputEncoder
 import omega.atlas.mobile.v2.feature.terminal.TerminalKey
 import omega.atlas.mobile.v2.feature.terminal.TerminalKeyEncoder
 import omega.atlas.mobile.v2.feature.terminal.TerminalWorkspaceChrome
@@ -254,8 +255,7 @@ private fun TerminalInputBar(
 
     fun sendDraftNow() {
         if (draft.isEmpty()) return
-        val payload = draft.encodeToByteArray() + TerminalKeyEncoder.encode(TerminalKey.ENTER)
-        onSend(payload)
+        onSend(TerminalInputEncoder.run(draft))
         draft = ""
         confirmMultiline = false
     }

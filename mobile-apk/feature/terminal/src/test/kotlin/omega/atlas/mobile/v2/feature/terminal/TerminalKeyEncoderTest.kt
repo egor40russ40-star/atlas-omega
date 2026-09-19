@@ -23,6 +23,25 @@ class TerminalKeyEncoderTest {
     }
 
     @Test
+    fun deterministicInputSeparatesPasteFromRun() {
+        assertArrayEquals(
+            "printf ok".encodeToByteArray(),
+            TerminalInputEncoder.paste("printf ok"),
+        )
+        assertArrayEquals(
+            "printf ok\r".encodeToByteArray(),
+            TerminalInputEncoder.run("printf ok"),
+        )
+    }
+
+    @Test
+    fun criticalKeyboardAlwaysContainsEnterAndInterrupt() {
+        val labels = CriticalActions.map { it.first }
+        assertTrue("ENTER" in labels)
+        assertTrue("C-C" in labels)
+    }
+
+    @Test
     fun multilinePasteRequiresConfirmation() {
         assertTrue(PasteSafety.requiresConfirmation("echo one\necho two"))
         assertFalse(PasteSafety.requiresConfirmation("git status"))
