@@ -81,7 +81,7 @@ class AtlasTerminalRuntime(
     private val _credentialStatus = mutableStateOf("Данные доступа хранятся в Android Keystore")
     val credentialStatus: State<String> = _credentialStatus
 
-    private val _directoryPath = mutableStateOf(DEFAULT_WORKSPACE_ROOT)
+    private val _directoryPath = mutableStateOf(_profile.value.workspaceRoot)
     val directoryPath: State<String> = _directoryPath
 
     private val _files = mutableStateOf<List<RemoteFileEntry>>(emptyList())
@@ -209,12 +209,14 @@ class AtlasTerminalRuntime(
         host: String,
         port: Int,
         username: String,
+        workspaceRoot: String,
         gatewayBaseUrl: String,
         autoConnect: Boolean,
     ) {
         require(host.isNotBlank())
         require(username.isNotBlank())
         require(port in 1..65535)
+        val normalizedWorkspaceRoot = normalizeWorkspaceRoot(workspaceRoot)
         val normalizedGateway = GatewayEndpointPolicy.normalizeHttpsBaseUrl(gatewayBaseUrl)
 
         val previous = _profile.value
@@ -228,12 +230,22 @@ class AtlasTerminalRuntime(
             host = host.trim(),
             port = port,
             username = username.trim(),
+            workspaceRoot = normalizedWorkspaceRoot,
             gatewayBaseUrl = normalizedGateway,
             trustState = if (endpointChanged) TrustState.UNENROLLED else previous.trustState,
             autoConnect = autoConnect,
         )
         _profile.value = updated
         profileStore.save(updated)
+        if (previous.workspaceRoot != updated.workspaceRoot) {
+            _directoryPath.value = updated.workspaceRoot
+            _files.value = emptyList()
+            _editor.value = EditorUiState()
+            editorDocument = null
+            _gitSnapshot.value = GitSnapshot(branch = "—")
+            _gitSelectedPath.value = null
+            _gitDiff.value = null
+        }
         _message.value = "Профиль сохранён"
     }
 
@@ -405,10 +417,10 @@ class AtlasTerminalRuntime(
                 commandRunner.run(profile, "printf ATLAS_MOBILE_OK")
             }
             val sftpDeferred = async {
-                remoteFilesPort().list(DEFAULT_WORKSPACE_ROOT)
+                remoteFilesPort().list(currentWorkspaceRoot())
             }
             val gitDeferred = async {
-                gitRepository.status(DEFAULT_WORKSPACE_ROOT)
+                gitRepository.status(currentWorkspaceRoot())
             }
 
             val gateway = gatewayDeferred.await()
@@ -534,7 +546,7 @@ class AtlasTerminalRuntime(
     fun refreshGit() {
         scope.launch { _gitBusy.value = true; _gitMessage.value = "Чтение Git status…" }
         scope.launch(Dispatchers.IO) {
-            when (val result = gitRepository.status(DEFAULT_WORKSPACE_ROOT)) {
+            when (val result = gitRepository.status(currentWorkspaceRoot())) {
                 is AtlasResult.Success -> scope.launch {
                     _gitSnapshot.value = result.value
                     _gitMessage.value = if (result.value.isClean) "Рабочее дерево чистое" else "${result.value.changes.size} изменений"
@@ -552,7 +564,7 @@ class AtlasTerminalRuntime(
         _gitSelectedPath.value = path
         _gitDiff.value = "Загрузка diff…"
         scope.launch(Dispatchers.IO) {
-            when (val result = gitRepository.diff(DEFAULT_WORKSPACE_ROOT, path)) {
+            when (val result = gitRepository.diff(currentWorkspaceRoot(), path)) {
                 is AtlasResult.Success -> scope.launch { _gitDiff.value = result.value.unifiedDiff }
                 is AtlasResult.Failure -> scope.launch { _gitDiff.value = gitErrorMessage(result.error.technicalDetail) }
             }
@@ -560,17 +572,17 @@ class AtlasTerminalRuntime(
     }
 
     fun stageGit(path: String) {
-        gitMutation("Добавление в stage…") { gitRepository.stage(DEFAULT_WORKSPACE_ROOT, path) }
+        gitMutation("Добавление в stage…") { gitRepository.stage(currentWorkspaceRoot(), path) }
     }
 
     fun unstageGit(path: String) {
-        gitMutation("Удаление из stage…") { gitRepository.unstage(DEFAULT_WORKSPACE_ROOT, path) }
+        gitMutation("Удаление из stage…") { gitRepository.unstage(currentWorkspaceRoot(), path) }
     }
 
     fun commitGit(message: String) {
         scope.launch { _gitBusy.value = true; _gitMessage.value = "Создание commit…" }
         scope.launch(Dispatchers.IO) {
-            when (val result = gitRepository.commit(DEFAULT_WORKSPACE_ROOT, message)) {
+            when (val result = gitRepository.commit(currentWorkspaceRoot(), message)) {
                 is AtlasResult.Success -> scope.launch {
                     _gitMessage.value = "Commit создан: ${result.value.take(12)}"
                     _gitBusy.value = false
@@ -635,9 +647,19 @@ class AtlasTerminalRuntime(
         trustPolicy = hostKeyPolicy,
     )
 
+    private fun currentWorkspaceRoot(): String = _profile.value.workspaceRoot
+
+    private fun normalizeWorkspaceRoot(value: String): String {
+        val normalized = value.trim().let {
+            if (it.length > 1) it.trimEnd('/') else it
+        }
+        require(normalized.startsWith('/')) { "Workspace root must be an absolute path" }
+        return normalized
+    }
+
     private fun normalizeRemotePath(value: String): String {
         val trimmed = value.trim()
-        if (trimmed.isBlank()) return DEFAULT_WORKSPACE_ROOT
+        if (trimmed.isBlank()) return currentWorkspaceRoot()
         return if (trimmed.length > 1) trimmed.trimEnd('/') else trimmed
     }
 

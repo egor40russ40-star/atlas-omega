@@ -339,6 +339,7 @@ private fun ConnectionSetup(
     var host by remember(current.id) { mutableStateOf(current.host) }
     var port by remember(current.id) { mutableStateOf(current.port.toString()) }
     var username by remember(current.id) { mutableStateOf(current.username) }
+    var workspaceRoot by remember(current.id) { mutableStateOf(current.workspaceRoot) }
     var gateway by remember(current.id) {
         mutableStateOf(current.gatewayBaseUrl ?: "https://tinvest-robot.tailf87948.ts.net")
     }
@@ -408,6 +409,16 @@ private fun ConnectionSetup(
             }
         }
         item {
+            OutlinedTextField(
+                value = workspaceRoot,
+                onValueChange = { workspaceRoot = it },
+                label = { Text("Рабочая папка") },
+                supportingText = { Text("Корень для Файлов, редактора, Git и self-test") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = autoConnect, onCheckedChange = { autoConnect = it })
                 Text("Автоподключение после запуска (после успешной настройки)")
@@ -421,6 +432,7 @@ private fun ConnectionSetup(
                         host = host,
                         port = port.toIntOrNull() ?: 22,
                         username = username,
+                        workspaceRoot = workspaceRoot,
                         gatewayBaseUrl = gateway,
                         autoConnect = autoConnect,
                     )

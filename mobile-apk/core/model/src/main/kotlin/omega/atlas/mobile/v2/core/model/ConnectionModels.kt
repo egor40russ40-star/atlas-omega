@@ -30,6 +30,7 @@ data class ConnectionProfile(
     val host: String,
     val port: Int = 22,
     val username: String,
+    val workspaceRoot: String = "/home/test4/ATLAS_EXECUTION_NODE",
     val gatewayBaseUrl: String? = null,
     val trustState: TrustState = TrustState.UNENROLLED,
     val autoConnect: Boolean = true,

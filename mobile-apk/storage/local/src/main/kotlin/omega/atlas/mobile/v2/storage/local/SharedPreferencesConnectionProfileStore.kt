@@ -20,6 +20,8 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
             host = host,
             port = prefs.getInt("port", 22),
             username = username,
+            workspaceRoot = prefs.getString("workspace_root", DEFAULT_WORKSPACE_ROOT)
+                ?: DEFAULT_WORKSPACE_ROOT,
             gatewayBaseUrl = prefs.getString("gateway", null),
             trustState = runCatching {
                 TrustState.valueOf(prefs.getString("trust", TrustState.UNENROLLED.name)!!)
@@ -35,6 +37,7 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
             .putString("host", profile.host.trim())
             .putInt("port", profile.port)
             .putString("username", profile.username.trim())
+            .putString("workspace_root", profile.workspaceRoot.trim())
             .putString("gateway", profile.gatewayBaseUrl)
             .putString("trust", profile.trustState.name)
             .putBoolean("auto_connect", profile.autoConnect)
@@ -47,5 +50,6 @@ class SharedPreferencesConnectionProfileStore(context: Context) {
 
     private companion object {
         const val DEFAULT_ID = "nucbox-primary"
+        const val DEFAULT_WORKSPACE_ROOT = "/home/test4/ATLAS_EXECUTION_NODE"
     }
 }
