@@ -37,6 +37,14 @@ class MainActivity : ComponentActivity() {
             onKeyboardInput = { bytes ->
                 if (::runtime.isInitialized) runtime.send(bytes)
             },
+            onResize = { dimensions ->
+                if (::runtime.isInitialized) {
+                    runtime.resize(
+                        columns = dimensions.columns,
+                        rows = dimensions.rows,
+                    )
+                }
+            },
             autoDetectUrls = true,
             boldAsBright = true,
         )

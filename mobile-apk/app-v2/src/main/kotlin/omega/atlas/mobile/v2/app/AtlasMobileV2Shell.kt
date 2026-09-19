@@ -172,6 +172,8 @@ private fun TerminalHome(
     val profile by runtime.profile
     val message by runtime.message
     val pendingTrust by runtime.pendingTrust
+    val clipboard = LocalClipboardManager.current
+    var terminalDraft by remember(profile.id) { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize()) {
         if (pendingTrust != null) {
@@ -208,7 +210,15 @@ private fun TerminalHome(
                     terminalEmulator = emulator,
                     modifier = Modifier.fillMaxSize(),
                     keyboardEnabled = state == TerminalLifecycleState.READY,
-                    showSoftKeyboard = true,
+                    // Soft IME uses the explicit command field below. Keeping the raw
+                    // terminal IME hidden avoids device-specific text composition bugs,
+                    // while hardware keyboards remain enabled by termlib.
+                    showSoftKeyboard = false,
+                    onPasteRequest = {
+                        clipboard.getText()?.text?.takeIf { it.isNotEmpty() }?.let {
+                            terminalDraft = it
+                        }
+                    },
                     initialFontSize = 13.sp,
                     backgroundColor = Color.Black,
                     foregroundColor = Color(0xFFE6EDF3),
@@ -219,6 +229,8 @@ private fun TerminalHome(
 
         TerminalInputBar(
             ready = state == TerminalLifecycleState.READY,
+            draft = terminalDraft,
+            onDraftChange = { terminalDraft = it },
             onSend = runtime::send,
         )
 
@@ -247,16 +259,17 @@ private fun TerminalHome(
 @Composable
 private fun TerminalInputBar(
     ready: Boolean,
+    draft: String,
+    onDraftChange: (String) -> Unit,
     onSend: (ByteArray) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    var draft by remember { mutableStateOf("") }
     var confirmMultiline by remember { mutableStateOf(false) }
 
     fun sendDraftNow() {
         if (draft.isEmpty()) return
         onSend(TerminalInputEncoder.run(draft))
-        draft = ""
+        onDraftChange("")
         confirmMultiline = false
     }
 
@@ -277,7 +290,7 @@ private fun TerminalInputBar(
     ) {
         OutlinedTextField(
             value = draft,
-            onValueChange = { draft = it },
+            onValueChange = onDraftChange,
             label = { Text("Команда / текст") },
             enabled = ready,
             maxLines = 2,
@@ -292,7 +305,7 @@ private fun TerminalInputBar(
             OutlinedButton(
                 onClick = {
                     val text = clipboard.getText()?.text.orEmpty()
-                    if (text.isNotEmpty()) draft = text
+                    if (text.isNotEmpty()) onDraftChange(text)
                 },
                 enabled = ready,
                 modifier = Modifier.weight(1f),
