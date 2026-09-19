@@ -69,6 +69,9 @@ class AtlasTerminalRuntime(
     private val _profile = mutableStateOf(profileStore.load() ?: defaultProfile())
     val profile: State<ConnectionProfile> = _profile
 
+    private val _profiles = mutableStateOf(profileStore.list().ifEmpty { listOf(_profile.value) })
+    val profiles: State<List<ConnectionProfile>> = _profiles
+
     private val _state = mutableStateOf(TerminalLifecycleState.DISCONNECTED)
     val state: State<TerminalLifecycleState> = _state
 
@@ -237,6 +240,7 @@ class AtlasTerminalRuntime(
         )
         _profile.value = updated
         profileStore.save(updated)
+        _profiles.value = profileStore.list()
         if (previous.workspaceRoot != updated.workspaceRoot) {
             _directoryPath.value = updated.workspaceRoot
             _files.value = emptyList()
