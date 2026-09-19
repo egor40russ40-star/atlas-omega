@@ -1,6 +1,7 @@
 package omega.atlas.mobile.v2.app
 
 import android.content.Context
+import java.util.UUID
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
@@ -176,6 +177,7 @@ class AtlasTerminalRuntime(
         val trusted = _profile.value.copy(trustState = TrustState.TRUSTED)
         _profile.value = trusted
         profileStore.save(trusted)
+        _profiles.value = profileStore.list()
         _pendingTrust.value = null
         connect()
     }
@@ -207,6 +209,47 @@ class AtlasTerminalRuntime(
         }
     }
 
+    fun beginNewProfile() {
+        val draft = ConnectionProfile(
+            id = "profile-" + UUID.randomUUID().toString(),
+            title = "Новое подключение",
+            host = "",
+            port = 22,
+            username = "",
+            workspaceRoot = "/home",
+            gatewayBaseUrl = DEFAULT_GATEWAY,
+            trustState = TrustState.UNENROLLED,
+            autoConnect = false,
+        )
+        applyActiveProfile(draft)
+        _credentialStatus.value = "Для нового профиля данные доступа ещё не сохранены"
+        _message.value = "Заполните новый профиль"
+    }
+
+    fun cancelProfileEdit() {
+        if (profileStore.contains(_profile.value.id)) return
+        val restored = profileStore.load() ?: defaultProfile()
+        applyActiveProfile(restored)
+        refreshCredentialStatus(restored.id)
+        _message.value = "Создание профиля отменено"
+    }
+
+    fun selectProfile(
+        id: String,
+        connectAfterSelection: Boolean = false,
+    ) {
+        val selected = profileStore.select(id) ?: return
+        scope.launch(Dispatchers.IO) {
+            coordinator.detach()
+            scope.launch {
+                applyActiveProfile(selected)
+                refreshCredentialStatus(selected.id)
+                _message.value = "Активный профиль: ${selected.title}"
+                if (connectAfterSelection) connect()
+            }
+        }
+    }
+
     fun saveProfile(
         title: String,
         host: String,
@@ -224,7 +267,7 @@ class AtlasTerminalRuntime(
 
         val previous = _profile.value
         val endpointChanged = previous.host != host.trim() || previous.port != port
-        if (endpointChanged) {
+        if (endpointChanged && previous.host.isNotBlank()) {
             hostKeyPolicy.clear(previous.host, previous.port)
         }
 
@@ -643,6 +686,37 @@ class AtlasTerminalRuntime(
 
     private fun postCredential(value: String) {
         scope.launch { _credentialStatus.value = value }
+    }
+
+    private fun applyActiveProfile(profile: ConnectionProfile) {
+        _profile.value = profile
+        _directoryPath.value = profile.workspaceRoot
+        _files.value = emptyList()
+        _filesMessage.value = "Нажмите «Обновить», чтобы загрузить файлы"
+        _editor.value = EditorUiState()
+        editorDocument = null
+        _gitSnapshot.value = GitSnapshot(branch = "—")
+        _gitSelectedPath.value = null
+        _gitDiff.value = null
+        _gitMessage.value = "Нажмите «Обновить Git»"
+        _gatewayVersion.value = null
+        _gatewayMessage.value = "Нажмите «Проверить Gateway»"
+        _pendingTrust.value = null
+        _state.value = TerminalLifecycleState.DISCONNECTED
+    }
+
+    private fun refreshCredentialStatus(profileId: String) {
+        scope.launch(Dispatchers.IO) {
+            val label = when (val loaded = vault.loadSshCredential(profileId)) {
+                is AtlasResult.Success -> when (loaded.value) {
+                    SshCredential.None -> "Данные доступа для профиля не сохранены"
+                    is SshCredential.Password -> "SSH-пароль сохранён в Android Keystore"
+                    is SshCredential.PrivateKey -> "SSH-ключ сохранён в Android Keystore"
+                }
+                is AtlasResult.Failure -> "Не удалось прочитать защищённые данные доступа"
+            }
+            postCredential(label)
+        }
     }
 
     private fun remoteFilesPort() = TrileadRemoteFilesPort(

@@ -22,6 +22,7 @@ import omega.atlas.mobile.v2.core.model.TrustState
 @Composable
 fun ConnectionListScreen(
     profiles: List<ConnectionProfile>,
+    activeProfileId: String? = null,
     onConnect: (ConnectionProfile) -> Unit,
     onEdit: (ConnectionProfile) -> Unit,
     onAdd: () -> Unit,
@@ -48,7 +49,12 @@ fun ConnectionListScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(profiles, key = { it.id }) { profile ->
-                ConnectionCard(profile, onConnect, onEdit)
+                ConnectionCard(
+                    profile = profile,
+                    active = profile.id == activeProfileId,
+                    onConnect = onConnect,
+                    onEdit = onEdit,
+                )
             }
         }
     }
@@ -57,6 +63,7 @@ fun ConnectionListScreen(
 @Composable
 private fun ConnectionCard(
     profile: ConnectionProfile,
+    active: Boolean,
     onConnect: (ConnectionProfile) -> Unit,
     onEdit: (ConnectionProfile) -> Unit,
 ) {
@@ -67,7 +74,12 @@ private fun ConnectionCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(profile.title, style = MaterialTheme.typography.titleMedium)
-                Text(trustLabel(profile.trustState), style = MaterialTheme.typography.labelMedium)
+                Column(horizontalAlignment = Alignment.End) {
+                    if (active) {
+                        Text("Активный", style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(trustLabel(profile.trustState), style = MaterialTheme.typography.labelMedium)
+                }
             }
             Text(
                 "${profile.username}@${profile.host}:${profile.port}",
@@ -79,7 +91,7 @@ private fun ConnectionCard(
             ) {
                 Button(
                     onClick = { onConnect(profile) },
-                    enabled = profile.trustState == TrustState.TRUSTED,
+                    enabled = profile.trustState != TrustState.REVOKED,
                 ) { Text("Подключить") }
                 OutlinedButton(onClick = { onEdit(profile) }) { Text("Изменить") }
             }

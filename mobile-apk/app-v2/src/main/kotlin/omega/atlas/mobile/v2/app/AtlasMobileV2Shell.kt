@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import omega.atlas.mobile.v2.core.model.LayerStatus
 import omega.atlas.mobile.v2.core.model.TerminalLifecycleState
 import omega.atlas.mobile.v2.feature.connections.ConnectionLaunchPolicy
+import omega.atlas.mobile.v2.feature.connections.ConnectionListScreen
 import omega.atlas.mobile.v2.feature.editor.CodeEditorScreen
 import omega.atlas.mobile.v2.feature.editor.CodeToTerminalAction
 import omega.atlas.mobile.v2.feature.git.GitScreen
@@ -132,9 +133,13 @@ fun AtlasMobileV2Shell(
                     runtime = runtime,
                     onBack = { secondaryTitle = null },
                 )
-                secondaryTitle == "Подключения" -> ConnectionSetup(
+                secondaryTitle == "Подключения" -> ConnectionsWorkspace(
                     runtime = runtime,
                     onBack = { secondaryTitle = null },
+                    onOpenTerminal = {
+                        secondaryTitle = null
+                        destination = RootDestination.TERMINAL
+                    },
                     onImportPrivateKey = onImportPrivateKey,
                 )
                 secondaryTitle != null -> SecondaryWorkspace(
@@ -323,6 +328,55 @@ private fun TerminalInputBar(
             dismissButton = {
                 OutlinedButton(onClick = { confirmMultiline = false }) { Text("Отмена") }
             },
+        )
+    }
+}
+
+@Composable
+private fun ConnectionsWorkspace(
+    runtime: AtlasTerminalRuntime,
+    onBack: () -> Unit,
+    onOpenTerminal: () -> Unit,
+    onImportPrivateKey: (String?) -> Unit,
+) {
+    val profiles by runtime.profiles
+    val active by runtime.profile
+    var editing by remember { mutableStateOf(false) }
+
+    if (editing) {
+        ConnectionSetup(
+            runtime = runtime,
+            onBack = {
+                runtime.cancelProfileEdit()
+                editing = false
+            },
+            onImportPrivateKey = onImportPrivateKey,
+        )
+        return
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        ) { Text("← Назад") }
+
+        ConnectionListScreen(
+            profiles = profiles,
+            activeProfileId = active.id,
+            onConnect = { selected ->
+                runtime.selectProfile(selected.id, connectAfterSelection = true)
+                onOpenTerminal()
+            },
+            onEdit = { selected ->
+                runtime.selectProfile(selected.id, connectAfterSelection = false)
+                editing = true
+            },
+            onAdd = {
+                runtime.beginNewProfile()
+                editing = true
+            },
+            modifier = Modifier.weight(1f),
         )
     }
 }
