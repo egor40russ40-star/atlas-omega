@@ -626,6 +626,10 @@ private fun CodeHome(runtime: AtlasTerminalRuntime) {
             dirty = editor.dirty,
             onTextChange = runtime::updateEditorText,
             onSave = runtime::saveEditor,
+            canUndo = editor.canUndo,
+            canRedo = editor.canRedo,
+            onUndo = runtime::undoEditor,
+            onRedo = runtime::redoEditor,
             onTerminalAction = { action, _ ->
                 runtime.insertEditorIntoTerminal(action == CodeToTerminalAction.RUN)
             },

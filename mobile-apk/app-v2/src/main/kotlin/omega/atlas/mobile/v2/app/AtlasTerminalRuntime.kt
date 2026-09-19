@@ -29,6 +29,7 @@ import omega.atlas.mobile.v2.feature.files.FileNavigationPolicy
 import omega.atlas.mobile.v2.feature.files.RemoteFileEntry
 import omega.atlas.mobile.v2.feature.files.RemoteTextDocument
 import omega.atlas.mobile.v2.feature.files.WorkspacePathPolicy
+import omega.atlas.mobile.v2.feature.editor.EditorHistory
 import omega.atlas.mobile.v2.feature.git.GitSnapshot
 import omega.atlas.mobile.v2.feature.sessions.TerminalSessionCoordinator
 import omega.atlas.mobile.v2.feature.terminal.TerminalSessionPort
@@ -56,6 +57,8 @@ data class EditorUiState(
     val dirty: Boolean = false,
     val loaded: Boolean = false,
     val saving: Boolean = false,
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
 )
 
 class AtlasTerminalRuntime(
@@ -115,6 +118,7 @@ class AtlasTerminalRuntime(
     val editor: State<EditorUiState> = _editor
 
     private var editorDocument: RemoteTextDocument? = null
+    private var editorHistory = EditorHistory("")
 
     private val _gitSnapshot = mutableStateOf(GitSnapshot(branch = "—"))
     val gitSnapshot: State<GitSnapshot> = _gitSnapshot
@@ -326,6 +330,7 @@ class AtlasTerminalRuntime(
             _files.value = emptyList()
             _editor.value = EditorUiState()
             editorDocument = null
+            editorHistory = EditorHistory("")
             _gitSnapshot.value = GitSnapshot(branch = "—")
             _gitSelectedPath.value = null
             _gitDiff.value = null
@@ -432,11 +437,14 @@ class AtlasTerminalRuntime(
             when (val result = remoteFilesPort().readText(safePath)) {
                 is AtlasResult.Success -> scope.launch {
                     editorDocument = result.value
+                    editorHistory = EditorHistory(result.value.text)
                     _editor.value = EditorUiState(
                         path = result.value.snapshot.path,
                         text = result.value.text,
                         dirty = false,
                         loaded = true,
+                        canUndo = false,
+                        canRedo = false,
                     )
                     _filesMessage.value = "Файл открыт"
                     recordRecentFile(result.value.snapshot.path)
@@ -495,8 +503,41 @@ class AtlasTerminalRuntime(
 
     fun updateEditorText(value: String) {
         val current = _editor.value
+        if (!current.loaded || current.text == value) return
+        editorHistory.record(value)
+        val baseline = editorDocument?.text.orEmpty()
+        _editor.value = current.copy(
+            text = value,
+            dirty = value != baseline,
+            canUndo = editorHistory.canUndo,
+            canRedo = editorHistory.canRedo,
+        )
+    }
+
+    fun undoEditor() {
+        val current = _editor.value
         if (!current.loaded) return
-        _editor.value = current.copy(text = value, dirty = true)
+        val next = editorHistory.undo() ?: return
+        val baseline = editorDocument?.text.orEmpty()
+        _editor.value = current.copy(
+            text = next,
+            dirty = next != baseline,
+            canUndo = editorHistory.canUndo,
+            canRedo = editorHistory.canRedo,
+        )
+    }
+
+    fun redoEditor() {
+        val current = _editor.value
+        if (!current.loaded) return
+        val next = editorHistory.redo() ?: return
+        val baseline = editorDocument?.text.orEmpty()
+        _editor.value = current.copy(
+            text = next,
+            dirty = next != baseline,
+            canUndo = editorHistory.canUndo,
+            canRedo = editorHistory.canRedo,
+        )
     }
 
     fun saveEditor() {
@@ -521,7 +562,12 @@ class AtlasTerminalRuntime(
                         snapshot = result.value,
                         text = current.text,
                     )
-                    _editor.value = current.copy(dirty = false, saving = false)
+                    _editor.value = current.copy(
+                        dirty = false,
+                        saving = false,
+                        canUndo = editorHistory.canUndo,
+                        canRedo = editorHistory.canRedo,
+                    )
                     _filesMessage.value = "Сохранено безопасно"
                     refreshFiles(_directoryPath.value)
                 }
@@ -798,6 +844,7 @@ class AtlasTerminalRuntime(
         _filesMessage.value = "Нажмите «Обновить», чтобы загрузить файлы"
         _editor.value = EditorUiState()
         editorDocument = null
+        editorHistory = EditorHistory("")
         _gitSnapshot.value = GitSnapshot(branch = "—")
         _gitSelectedPath.value = null
         _gitDiff.value = null
